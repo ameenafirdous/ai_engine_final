@@ -982,9 +982,8 @@ elif page == "Evidence Explorer":
 elif page == "Ask the Evidence":
     st.subheader("Ask the evidence")
     st.caption(
-        "Choose a research question or write your own. The workflow retrieves CSV evidence, "
-        "compares opportunity areas, quantifies retrieved records where possible, and "
-        "returns an evidence-cited analysis—not just sentiment or a review summary."
+        "CSV-only analysis. Answers are calculated from retrieved feedback and original quotes; "
+        "no external AI/API is used. Counts describe this dataset, not all INDmoney investors."
     )
 
     research_questions = {
@@ -1000,7 +999,8 @@ elif page == "Ask the Evidence":
         "Custom research question": "",
     }
     selected_question = st.selectbox(
-        "Pre-built research questions", ["Choose a question…"] + list(research_questions.keys()),
+        "Pre-built research questions",
+        ["Choose a question…"] + list(research_questions.keys()),
         key="ask_evidence_preset"
     )
     if selected_question != "Choose a question…":
@@ -1010,88 +1010,138 @@ elif page == "Ask the Evidence":
         placeholder="Choose a preset or ask your own evidence-based research question."
     )
 
-    if st.button("Analyze evidence", type="primary", key="ask_evidence_button"):
-        results = rank_evidence(data, question, limit=40) if question.strip() else []
-        if not results:
-            st.warning("No sufficiently specific evidence matched this question in the CSV. Try a narrower wording or review the dataset coverage; the app will not pad results with loosely related records.")
+    if st.button("Analyze CSV evidence", type="primary", key="ask_evidence_button"):
+        if not question.strip():
+            st.warning("Choose a preset or enter a research question.")
         else:
-            retrieved = [item[2] for item in results]
-            matched = pd.DataFrame(retrieved)
-            theme_counts = matched["_label"].value_counts()
-            source_counts = matched["_source"].value_counts()
-            st.markdown("### Retrieved evidence")
-            st.write(f"Retrieved **{len(retrieved)} relevant candidate records** from **{len(data):,} total CSV records**. The question-specific filter may return fewer than 40; these are retrieval counts, not population estimates.")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**Retrieved records by theme**")
-                st.dataframe(theme_counts.rename_axis("Theme").reset_index(name="Records"), use_container_width=True, hide_index=True)
-            with col2:
-                st.markdown("**Retrieved records by source**")
-                st.dataframe(source_counts.rename_axis("Source").reset_index(name="Records"), use_container_width=True, hide_index=True)
-
-            # Read credentials/configuration from Streamlit Secrets (or deployment env).
-            # Never expose or ask the user to paste secrets into the research UI.
-            api_key = os.getenv("TOKENHARBOR_API_KEY", "")
-            base_url = os.getenv("TOKENHARBOR_BASE_URL", "https://api.openai.com/v1/chat/completions")
-            model = os.getenv("TOKENHARBOR_MODEL", "gpt-4o-mini")
-            try:
-                api_key = st.secrets.get("TOKENHARBOR_API_KEY", api_key)
-                base_url = st.secrets.get("TOKENHARBOR_BASE_URL", base_url)
-                model = st.secrets.get("TOKENHARBOR_MODEL", model)
-            except Exception:
-                pass
-
-            if not api_key:
-                st.error("Research analysis is not configured. Add LLM_API_KEY to Streamlit Secrets and try again.")
-            else:
-                evidence_payload = []
-                for i, row in enumerate(retrieved, 1):
-                    evidence_payload.append({
-                        "evidence_id": f"E{i}", "text": row["_text"],
-                        "source": row["_source"], "date": str(row["_date"]),
-                        "theme": row["_label"], "record_id": row["_id"], "url": row["_url"]
-                    })
-                prompt = f"""You are an evidence-led product discovery researcher. Answer the research question using ONLY the supplied CSV evidence.
-Research question: {question}
-
-Produce a rigorous, high-quality product discovery analysis with these sections:
-1. Executive answer: answer the exact question directly in 2-4 sentences.
-2. Key patterns: identify distinct, question-relevant patterns. For each, state the number of retrieved records supporting it, the denominator, the observed user friction/need, and what the records actually say. Themes may overlap; do not sum them as mutually exclusive.
-3. Evidence comparison: compare patterns using evidence strength (specificity, consistency, source diversity, and counter-evidence), not volume alone. Label interpretations and hypotheses clearly.
-4. Segment analysis: only compare age, income stability, source of money, or influence when those attributes are explicitly present in the supplied records. Otherwise state that the CSV cannot support the requested comparison and identify the missing fields.
-5. Counter-evidence and uncertainty: surface contradictory records, weak matches, missing data, and limits. Do not infer actual SIP continuation outcomes unless explicitly documented.
-6. Product opportunities: propose focused opportunities tied to observed user needs, without pretending they are validated solutions.
-7. Validation plan: propose the next interview, usability, payment, or behavioral-data checks needed.
-8. Metric connection: cautiously relate hypotheses to first-time mutual-fund investors with at least one successful SIP instalment in the 30 days around month 12. Do not claim feedback proves impact.
-
-Rules: Use ONLY supplied CSV evidence. Never invent quotes, counts, sources, segments, or causal claims. Cite every substantive evidence claim with IDs like [E3]. Public feedback is self-selected and not representative. Do not recommend specific funds/stocks or use fear, FOMO, or urgency. Be candid when evidence is insufficient. Avoid generic advice and unsupported extrapolation.
-Evidence JSON: {json.dumps(evidence_payload, ensure_ascii=False)}"""
-                payload = json.dumps({
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": "Be rigorous, transparent, concise, and evidence-grounded. Never fabricate evidence."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": 0.2
-                }).encode("utf-8")
-                req = urllib.request.Request(
-                    base_url, data=payload,
-                    headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
-                    method="POST"
+            results = rank_evidence(data, question, limit=40)
+            if not results:
+                st.warning(
+                    "No sufficiently specific records matched this question in the CSV. "
+                    "Try a narrower or different wording, or inspect the Evidence Explorer. "
+                    "The app will not invent an answer or pad the results with weak matches."
                 )
-                try:
-                    with urllib.request.urlopen(req, timeout=60) as response:
-                        result = json.loads(response.read().decode("utf-8"))
-                    answer = result["choices"][0]["message"]["content"]
-                    st.markdown("### AI research answer")
-                    st.markdown(answer)
-                except Exception as exc:
-                    st.error(f"API request failed: {exc}. Retrieved evidence remains available below.")
-            st.markdown("### Supporting original feedback")
-            for row in retrieved[:15]:
-                with st.container(border=True):
-                    show_evidence(row)
-            st.caption("Review original quotes and links before accepting an insight. Counts describe only question-matched records in this CSV, not population prevalence; evidence suggests hypotheses, not causality.")
+            else:
+                retrieved = [item[2] for item in results]
+                matched = pd.DataFrame(retrieved)
+                n_retrieved = len(matched)
+                theme_counts = matched["_label"].value_counts()
+                source_counts = matched["_source"].value_counts()
+
+                st.markdown("### Answer from the CSV")
+                st.write(
+                    f"The question-specific search retrieved **{n_retrieved} records** "
+                    f"from **{len(data):,} loaded records**. "
+                    "The findings below describe only these retrieved records. "
+                    "They are evidence signals, not population estimates or proof of causation."
+                )
+
+                st.markdown("### Main evidence patterns")
+                pattern_defs = {
+                    "Continuation / motivation": [
+                        "continue", "continuing", "long term", "goal", "future", "wealth",
+                        "regular", "discipline", "habit", "stay invested"
+                    ],
+                    "Pause / stop / cancellation": [
+                        "stop", "stopped", "cancel", "pause", "paused", "restart",
+                        "discontinue", "withdraw", "missed"
+                    ],
+                    "Payment / mandate friction": [
+                        "payment", "failed", "mandate", "autopay", "debit", "bank",
+                        "instalment", "installment"
+                    ],
+                    "Affordability / cash flow": [
+                        "salary", "balance", "expense", "emergency", "afford", "cash",
+                        "amount", "income", "reduce"
+                    ],
+                    "Returns / risk / uncertainty": [
+                        "return", "loss", "negative", "market", "risk", "profit",
+                        "volatility", "uncertain"
+                    ],
+                    "App / support / trust": [
+                        "app", "support", "customer care", "trust", "complaint", "issue",
+                        "problem"
+                    ],
+                    "Status / transaction clarity": [
+                        "status", "transaction", "pending", "nav", "unit", "portfolio",
+                        "allotment"
+                    ],
+                }
+                pattern_rows = []
+                lower_text = matched["_text"].fillna("").astype(str).str.lower()
+                for pattern_name, terms in pattern_defs.items():
+                    mask = lower_text.apply(lambda text: any(term in text for term in terms))
+                    count = int(mask.sum())
+                    if count:
+                        pattern_rows.append({
+                            "Pattern": pattern_name,
+                            "Records": count,
+                            "Share of retrieved": count / n_retrieved,
+                        })
+                if pattern_rows:
+                    pattern_df = pd.DataFrame(pattern_rows).sort_values(
+                        ["Records", "Pattern"], ascending=[False, True]
+                    )
+                    st.dataframe(
+                        pattern_df.style.format({"Share of retrieved": "{:.1%}"}),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                    top_pattern = pattern_df.iloc[0]
+                    st.markdown("**Evidence-led answer:**")
+                    st.write(
+                        f"Among the retrieved records, **{top_pattern['Pattern'].lower()}** "
+                        f"is the most frequently detected keyword pattern "
+                        f"({int(top_pattern['Records'])} of {n_retrieved} records, "
+                        f"{top_pattern['Share of retrieved']:.1%}). "
+                        "This is a keyword-based signal; review the original feedback below "
+                        "to confirm the context and meaning."
+                    )
+                else:
+                    st.info(
+                        "The retrieved records did not match the predefined pattern screens. "
+                        "Use the original feedback below for qualitative interpretation."
+                    )
+
+                st.markdown("### Retrieved themes")
+                theme_summary = theme_counts.rename_axis("Theme").reset_index(name="Records")
+                theme_summary["Share of retrieved"] = theme_summary["Records"] / n_retrieved
+                st.dataframe(
+                    theme_summary.style.format({"Share of retrieved": "{:.1%}"}),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                st.markdown("### Source coverage")
+                source_summary = source_counts.rename_axis("Source").reset_index(name="Records")
+                st.dataframe(source_summary, use_container_width=True, hide_index=True)
+
+                st.markdown("### Original feedback")
+                st.caption(
+                    "Quotes below are copied directly from the CSV. Use the source links and "
+                    "record IDs to validate interpretation."
+                )
+                for item in results[:15]:
+                    _, _, row, _, _ = item
+                    with st.container(border=True):
+                        show_evidence(row)
+
+                st.markdown("### Connection to the business metric")
+                st.write(
+                    "These records may suggest motivations or friction relevant to SIP continuation. "
+                    "The CSV does not, by itself, link feedback to first-time investor status or "
+                    "12-month outcomes, so it cannot establish that these patterns cause changes "
+                    "in the 12-month active-SIP continuation rate."
+                )
+
+                st.markdown("### Method and limitations")
+                st.markdown(
+                    f"- Retrieved evidence: **{n_retrieved}** of **{len(data):,}** loaded records.\n"
+                    "- Method: question-profile keyword anchors and keyword-pattern counts; no AI-generated answer.\n"
+                    "- Pattern categories can overlap; their counts should not be added together.\n"
+                    "- Public feedback may be self-selected and is not necessarily representative.\n"
+                    "- Treat patterns as hypotheses; manually review original quotes before using them as findings."
+                )
 
 elif page == "Challenge & Insight":
     st.subheader("Challenge & insight")
