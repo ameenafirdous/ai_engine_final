@@ -1,4 +1,8 @@
 import re
+import os
+import json
+import urllib.request
+import urllib.error
 from pathlib import Path
 from collections import Counter
 
@@ -397,7 +401,13 @@ with st.sidebar:
     st.header("Navigation")
     page = st.radio(
         "Choose a section",
-        ["Dashboard", "Insights", "Opportunity Areas", "Pipeline", "Ask AI", "Evidence Browser"],
+        [
+            "Research Overview", "Dashboard", "Primary Research", "Contradictions & Gaps",
+            "Failure Explorer", "Pattern Explorer", "Candidate Problem Areas",
+            "Evidence Explorer", "Ask the Evidence", "Challenge & Insight",
+            "Insight Methodology", "Quality & Integrity", "Insights",
+            "Opportunity Areas", "Pipeline", "Ask AI", "Evidence Browser"
+        ],
         label_visibility="collapsed",
     )
     st.divider()
@@ -762,6 +772,302 @@ elif page == "Ask AI":
                     "- **Causality:** quotes and themes suggest hypotheses, not causal explanations or measured impact.\n"
                     "- **Validation:** inspect the original quote and source link, then hand-label a sample and record agreement in the AI Evidence Log."
                 )
+
+elif page == "Research Overview":
+    st.subheader("Research overview")
+    st.caption("A snapshot of the evidence base and the research question.")
+    n = len(data)
+    date_values = data["_date"].dropna()
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Feedback records", f"{n:,}")
+    c2.metric("Sources", f"{data['_source'].nunique():,}")
+    c3.metric("Themes / labels", f"{data['_label'].nunique():,}")
+    c4.metric("Dated records", f"{len(date_values):,}")
+    st.markdown("### Research objective")
+    st.write("Identify and compare potential product opportunity areas that may influence the share of first-time mutual-fund investors who still have an active SIP 12 months after starting their first SIP.")
+    st.info("Active SIP definition: at least one successful instalment in the 30 days around the 12-month measurement point. This feedback dataset does not directly measure that outcome.")
+    left, right = st.columns(2)
+    with left:
+        st.markdown("#### Evidence coverage")
+        src_counts = data["_source"].value_counts().rename_axis("Source").reset_index(name="Records")
+        st.dataframe(src_counts, use_container_width=True, hide_index=True)
+    with right:
+        st.markdown("#### Most common recorded labels")
+        lbl_counts = data["_label"].value_counts().head(10).rename_axis("Theme").reset_index(name="Records")
+        st.dataframe(lbl_counts, use_container_width=True, hide_index=True)
+    st.markdown("#### Current research questions")
+    st.markdown("\\n".join(f"- {q}" for q in PRESET_QUESTIONS[:6]))
+    st.caption("Counts describe this collected dataset, not all INDmoney investors.")
+
+elif page == "Primary Research":
+    st.subheader("Primary research")
+    st.caption("No interview or survey records are inferred from public feedback. Add primary-research notes only when collected.")
+    st.warning("Primary research data was not identified in the loaded CSV. This section intentionally does not fabricate interviews, participants, or findings.")
+    with st.expander("Capture a research session note"):
+        with st.form("primary_research_note"):
+            participant = st.text_input("Participant code (avoid personal identifiers)")
+            method = st.selectbox("Method", ["Interview", "Usability test", "Survey", "Other"])
+            date = st.date_input("Research date")
+            note = st.text_area("Research notes / direct observations")
+            submitted = st.form_submit_button("Save note to session")
+            if submitted:
+                st.session_state.setdefault("primary_notes", [])
+                st.session_state["primary_notes"].append({
+                    "participant": participant or "Unspecified",
+                    "method": method, "date": str(date), "note": note
+                })
+                st.success("Note saved for this app session only.")
+    notes = st.session_state.get("primary_notes", [])
+    if notes:
+        st.markdown("### Session notes")
+        for note in notes:
+            st.container(border=True)
+            st.write(f"{note['method']} · {note['date']} · {note['participant']}")
+            st.write(note["note"])
+
+elif page == "Contradictions & Gaps":
+    st.subheader("Contradictions & gaps")
+    st.caption("Automated term-based candidate detection. Treat these as review queues, not verified contradictions.")
+    pairs = [
+        ("Positive return / growth", ["good return", "profit", "positive return", "growth", "earning"]),
+        ("Negative return / loss", ["loss", "negative return", "down", "decline", "poor return"]),
+        ("Easy / smooth experience", ["easy", "smooth", "simple", "seamless"]),
+        ("Difficult / broken experience", ["difficult", "problem", "issue", "failed", "error"]),
+        ("Continue / long-term intent", ["continue", "long term", "keep investing", "stay invested"]),
+        ("Stop / pause intent", ["stop", "cancel", "pause", "discontinue", "quit"]),
+    ]
+    labels = []
+    for i in range(0, len(pairs), 2):
+        a, b = pairs[i], pairs[i+1]
+        def match_terms(terms):
+            return data["_text"].str.lower().apply(lambda t: any(term in t for term in terms))
+        ma, mb = match_terms(a[1]), match_terms(b[1])
+        ca, cb = int(ma.sum()), int(mb.sum())
+        st.markdown(f"#### {a[0]} vs {b[0]}")
+        x, y = st.columns(2)
+        with x:
+            st.metric(a[0], ca)
+            for _, row in data[ma].head(3).iterrows():
+                with st.container(border=True): show_evidence(row)
+        with y:
+            st.metric(b[0], cb)
+            for _, row in data[mb].head(3).iterrows():
+                with st.container(border=True): show_evidence(row)
+        st.caption("These buckets can overlap and may reflect different contexts or users; compare original records before calling this a contradiction.")
+    st.markdown("### Research gaps to investigate")
+    st.markdown("- Feedback is not linked to actual 12-month SIP continuation outcomes.\\n- Public feedback may overrepresent unusually positive or negative experiences.\\n- The CSV may not distinguish first-time investors from experienced investors.\\n- Reasons inferred from keyword matches require manual coding and user follow-up.")
+
+elif page == "Failure Explorer":
+    st.subheader("Failure explorer")
+    st.caption("Explore potential SIP journey failures using transparent keyword screens.")
+    failure_defs = {
+        "Payment / debit failure": ["failed payment", "payment failed", "debit failed", "transaction failed", "payment failure"],
+        "Mandate / autopay": ["mandate", "autopay", "auto debit", "e mandate", "e-mandate"],
+        "Missed instalment": ["missed instalment", "missed installment", "missed sip", "instalment failed", "installment failed"],
+        "Pending transaction / units": ["pending", "unit allocation", "allotment", "processing"],
+        "App / support issue": ["customer support", "customer care", "not working", "app issue", "complaint"],
+        "Pause / cancellation": ["pause", "paused", "cancel", "cancellation", "stop sip", "stopped sip"],
+    }
+    options = list(failure_defs)
+    selected = st.selectbox("Failure category", options)
+    terms = failure_defs[selected]
+    subset = data[data["_text"].str.lower().apply(lambda t: any(term in t for term in terms))]
+    c1, c2 = st.columns(2)
+    c1.metric("Keyword-matched records", f"{len(subset):,}")
+    c2.metric("Share of dataset", f"{len(subset)/len(data):.1%}" if len(data) else "—")
+    st.caption("Screening count only; keyword matches can include false positives and are not validated failure rates.")
+    for _, row in subset.head(50).iterrows():
+        with st.container(border=True): show_evidence(row)
+
+elif page == "Pattern Explorer":
+    st.subheader("Pattern explorer")
+    st.caption("Compare recorded labels and directional keyword patterns across sources.")
+    selected_pattern = st.selectbox("Pattern", [
+        "Payment / mandate", "Affordability / cash flow", "Returns / risk",
+        "Pause / stop", "Status / transaction clarity", "App / support / trust"
+    ])
+    terms_by_pattern = {
+        "Payment / mandate": ["payment", "mandate", "autopay", "debit", "failed"],
+        "Affordability / cash flow": ["salary", "balance", "expense", "emergency", "cash", "income", "reduce"],
+        "Returns / risk": ["return", "loss", "negative", "market", "risk", "volatility"],
+        "Pause / stop": ["pause", "paused", "stop", "stopped", "cancel", "discontinue"],
+        "Status / transaction clarity": ["status", "pending", "transaction", "nav", "unit", "allotment"],
+        "App / support / trust": ["app", "support", "customer care", "trust", "complaint", "issue"],
+    }
+    terms = terms_by_pattern[selected_pattern]
+    mask = data["_text"].str.lower().apply(lambda t: any(term in t for term in terms))
+    subset = data[mask].copy()
+    st.metric("Keyword-matched records", f"{len(subset):,}", f"{len(subset)/len(data):.1%} of dataset" if len(data) else None)
+    by_source = subset["_source"].value_counts().rename_axis("Source").reset_index(name="Records")
+    if not by_source.empty:
+        st.plotly_chart(px.bar(by_source, x="Source", y="Records", title=f"{selected_pattern} by source"), use_container_width=True)
+    by_label = subset["_label"].value_counts().rename_axis("Theme").reset_index(name="Records")
+    st.dataframe(by_label, use_container_width=True, hide_index=True)
+    for _, row in subset.head(20).iterrows():
+        with st.container(border=True): show_evidence(row)
+
+elif page == "Candidate Problem Areas":
+    st.subheader("Candidate problem areas")
+    st.caption("Prioritization is an initial screening based on evidence volume and metric relevance—not a validated impact estimate.")
+    opp = opportunity_rows(data)
+    continuity_terms = ["sip", "continue", "stop", "pause", "cancel", "payment", "mandate", "missed", "instalment", "installment"]
+    opp["Metric relevance screen"] = opp["Theme"].astype(str).str.lower().apply(
+        lambda t: "Potentially relevant" if any(term in t for term in continuity_terms) else "Needs review"
+    )
+    opp["Evidence volume score"] = opp["Feedback count"] / max(1, opp["Feedback count"].max())
+    opp["Screening score"] = opp["Evidence volume score"] * opp["Metric relevance screen"].map(
+        {"Potentially relevant": 1.0, "Needs review": 0.5}
+    )
+    opp = opp.sort_values(["Screening score", "Feedback count"], ascending=False)
+    st.dataframe(opp[["Theme", "Feedback count", "Share", "Metric relevance screen",
+                      "Screening score", "Opportunity hypothesis"]].style.format(
+                          {"Share": "{:.1%}", "Screening score": "{:.2f}"}),
+                 use_container_width=True, hide_index=True)
+    st.caption("Validate relevance by reviewing quotes and checking whether the issue plausibly affects SIP continuity.")
+
+elif page == "Evidence Explorer":
+    st.subheader("Evidence explorer")
+    st.caption("Search original records and preserve traceability.")
+    c1, c2, c3 = st.columns(3)
+    sources = ["All"] + sorted(data["_source"].dropna().unique().tolist())
+    labels = ["All"] + sorted(data["_label"].dropna().unique().tolist())
+    years = ["All"] + sorted(data["_date"].dropna().dt.year.unique().tolist(), reverse=True)
+    with c1: esource = st.selectbox("Source", sources, key="evidence_explorer_source")
+    with c2: elabel = st.selectbox("Theme", labels, key="evidence_explorer_label")
+    with c3: eyear = st.selectbox("Year", years, key="evidence_explorer_year")
+    search = st.text_input("Search original text", key="evidence_explorer_search")
+    view = data.copy()
+    if esource != "All": view = view[view["_source"] == esource]
+    if elabel != "All": view = view[view["_label"] == elabel]
+    if eyear != "All": view = view[view["_date"].dt.year == int(eyear)]
+    if search.strip(): view = view[view["_text"].str.contains(re.escape(search), case=False, na=False)]
+    st.caption(f"{len(view):,} matching records")
+    for _, row in view.sort_values("_date", ascending=False, na_position="last").head(100).iterrows():
+        with st.container(border=True): show_evidence(row)
+
+elif page == "Ask the Evidence":
+    st.subheader("Ask the evidence")
+    st.caption("Evidence-grounded synthesis. Configure an OpenAI-compatible API using environment variables or Streamlit secrets; otherwise the app displays a local evidence summary.")
+    question = st.text_area("Research question", key="ask_evidence_question", placeholder="What might make first-time investors stop or pause their SIP?")
+    if st.button("Analyze evidence", type="primary", key="ask_evidence_button"):
+        results = rank_evidence(data, question, limit=30) if question.strip() else []
+        if not results:
+            st.warning("Enter a question and ensure the CSV contains relevant feedback.")
+        else:
+            retrieved = [item[2] for item in results]
+            st.markdown("### Evidence retrieved")
+            st.write(f"{len(retrieved)} records retrieved from {len(data)} total records.")
+            for row in retrieved[:10]:
+                with st.container(border=True): show_evidence(row)
+            api_key = os.getenv("LLM_API_KEY", "")
+            base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1/chat/completions")
+            model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+            try:
+                if "LLM_API_KEY" in st.secrets: api_key = st.secrets["LLM_API_KEY"]
+                if "LLM_BASE_URL" in st.secrets: base_url = st.secrets["LLM_BASE_URL"]
+                if "LLM_MODEL" in st.secrets: model = st.secrets["LLM_MODEL"]
+            except Exception:
+                pass
+            if api_key:
+                evidence_payload = []
+                for i, row in enumerate(retrieved, 1):
+                    evidence_payload.append({
+                        "evidence_id": f"E{i}", "text": row["_text"],
+                        "source": row["_source"], "date": str(row["_date"]),
+                        "label": row["_label"], "record_id": row["_id"], "url": row["_url"]
+                    })
+                prompt = (
+                    "You are a rigorous product discovery research analyst. Answer only from supplied CSV evidence. "
+                    "Never invent quotes, counts, causal claims, or missing attributes. Separate observations, "
+                    "interpretations, and hypotheses. Counts in evidence are retrieved-record counts, not population estimates. "
+                    "Cite evidence IDs (E1 etc.) for every substantive claim. Discuss counter-evidence and limitations. "
+                    "Connect cautiously to the business metric: first-time investors with >=1 successful SIP instalment "
+                    "in the 30 days around month 12. Do not recommend specific funds or use fear/FOMO. "
+                    f"Research question: {question}\\nEvidence JSON: {json.dumps(evidence_payload, ensure_ascii=False)}"
+                )
+                payload = json.dumps({
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": "Be evidence-grounded, concise, and explicit about uncertainty."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.2
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    base_url, data=payload,
+                    headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+                    method="POST"
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=60) as response:
+                        result = json.loads(response.read().decode("utf-8"))
+                    answer = result["choices"][0]["message"]["content"]
+                    st.markdown("### AI synthesis")
+                    st.markdown(answer)
+                except Exception as exc:
+                    st.error(f"API request failed: {exc}. Showing retrieved evidence only.")
+            else:
+                st.info("No API key configured. Showing evidence retrieval only; no generative AI answer was produced.")
+            st.markdown("### Evidence coverage")
+            theme_summary = pd.DataFrame([r[2] for r in results])["_label"].value_counts().rename_axis("Theme").reset_index(name="Retrieved records")
+            st.dataframe(theme_summary, use_container_width=True, hide_index=True)
+
+elif page == "Challenge & Insight":
+    st.subheader("Challenge & insight")
+    st.caption("Use this workspace to test a proposed insight against supporting and opposing evidence.")
+    insight = st.text_area("Proposed insight", placeholder="Payment uncertainty may interrupt SIP continuation.")
+    terms = st.text_input("Search terms for supporting evidence", placeholder="payment, mandate, failed")
+    counter_terms = st.text_input("Search terms for counter-evidence", placeholder="successful, easy, resolved")
+    if st.button("Find evidence for and against", key="challenge_button"):
+        def find_terms(term_string):
+            ts = [t.strip().lower() for t in term_string.split(",") if t.strip()]
+            mask = data["_text"].str.lower().apply(lambda text: any(t in text for t in ts)) if ts else pd.Series(False, index=data.index)
+            return data[mask]
+        support = find_terms(terms)
+        counter = find_terms(counter_terms)
+        left, right = st.columns(2)
+        with left:
+            st.markdown(f"### Supporting candidates ({len(support)})")
+            for _, row in support.head(8).iterrows():
+                with st.container(border=True): show_evidence(row)
+        with right:
+            st.markdown(f"### Counter-evidence candidates ({len(counter)})")
+            for _, row in counter.head(8).iterrows():
+                with st.container(border=True): show_evidence(row)
+        st.warning("Keyword matches are candidate evidence. Manually verify relevance and whether records genuinely contradict the proposed insight.")
+
+elif page == "Insight Methodology":
+    st.subheader("Insight methodology")
+    st.markdown("""
+    1. **Load:** identify feedback text and available source/date/label/URL/ID fields.
+    2. **Retrieve:** rank records using question-token overlap, synonym expansion, and label matches.
+    3. **Count:** report retrieved records and keyword-screen counts with explicit denominators.
+    4. **Interpret:** distinguish evidence from interpretation and opportunity hypotheses.
+    5. **Validate:** inspect original quotes, source links, and counter-evidence; hand-label a sample.
+    6. **Connect:** treat relevance to 12-month active SIP continuation as a hypothesis unless linked behavioral outcomes exist.
+    """)
+    st.markdown("### Retrieval scoring")
+    st.code("score = 4 × direct text-token overlap + 2 × expanded overlap + 7 × direct label overlap + 4 × expanded label overlap + concept boosts")
+    st.caption("This is a heuristic ranking, not a semantic model or validated classifier.")
+
+elif page == "Quality & Integrity":
+    st.subheader("Quality & integrity")
+    n = len(data)
+    quality_rows = [
+        ("Non-empty feedback", n, n),
+        ("Source present", int(data["_source"].astype(str).str.strip().ne("").sum()), n),
+        ("Date present", int(data["_date"].notna().sum()), n),
+        ("Source URL present", int(data["_url"].astype(str).str.strip().ne("").sum()), n),
+        ("Theme/label present", int(data["_label"].astype(str).str.strip().ne("Unlabelled").sum()), n),
+        ("Record ID present", int(data["_id"].astype(str).str.strip().ne("").sum()), n),
+    ]
+    quality = pd.DataFrame([{"Check": name, "Records": count, "Total": total,
+                            "Coverage": count/total if total else 0}
+                           for name, count, total in quality_rows])
+    st.dataframe(quality.style.format({"Coverage": "{:.1%}"}), use_container_width=True, hide_index=True)
+    st.markdown("### Integrity rules")
+    st.markdown("- Original feedback text is displayed without rewriting.\\n- Keyword matches are directional and may overlap.\\n- Retrieved feedback is self-selected and not necessarily representative.\\n- Theme labels may be unverified; inspect source text.\\n- No causal effect or 12-month retention rate is calculated from this dataset.\\n- API-generated synthesis, when configured, is grounded in retrieved excerpts but still requires human verification.")
+
 elif page == "Evidence Browser":
     st.subheader("Evidence browser")
     st.caption("Use dropdowns to filter by year, platform, and assigned theme.")
