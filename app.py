@@ -1010,23 +1010,6 @@ elif page == "Ask the Evidence":
         placeholder="Choose a preset or ask your own evidence-based research question."
     )
 
-    with st.expander("Optional AI API settings", expanded=False):
-        st.caption("You can enter a key for this Streamlit session, or configure it in Streamlit Secrets. Never paste your key into the research question or CSV.")
-        session_api_key = st.text_input(
-            "API key", type="password", value=st.session_state.get("ask_api_key", ""),
-            help="Stored only in this active Streamlit session when entered here.", key="ask_api_key_input"
-        )
-        session_base_url = st.text_input(
-            "Chat Completions endpoint", value=st.session_state.get("ask_api_base_url", "https://api.openai.com/v1/chat/completions"),
-            key="ask_api_base_url_input"
-        )
-        session_model = st.text_input(
-            "Model", value=st.session_state.get("ask_api_model", "gpt-4o-mini"), key="ask_api_model_input"
-        )
-        st.session_state["ask_api_key"] = session_api_key
-        st.session_state["ask_api_base_url"] = session_base_url
-        st.session_state["ask_api_model"] = session_model
-
     if st.button("Analyze evidence", type="primary", key="ask_evidence_button"):
         results = rank_evidence(data, question, limit=40) if question.strip() else []
         if not results:
@@ -1046,17 +1029,21 @@ elif page == "Ask the Evidence":
                 st.markdown("**Retrieved records by source**")
                 st.dataframe(source_counts.rename_axis("Source").reset_index(name="Records"), use_container_width=True, hide_index=True)
 
-            api_key = st.session_state.get("ask_api_key", "") or os.getenv("LLM_API_KEY", "")
-            base_url = st.session_state.get("ask_api_base_url", "https://api.openai.com/v1/chat/completions") or os.getenv("LLM_BASE_URL", "https://api.openai.com/v1/chat/completions")
-            model = st.session_state.get("ask_api_model", "gpt-4o-mini") or os.getenv("LLM_MODEL", "gpt-4o-mini")
+            # Read credentials/configuration from Streamlit Secrets (or deployment env).
+            # Never expose or ask the user to paste secrets into the research UI.
+            api_key = os.getenv("LLM_API_KEY", "")
+            base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1/chat/completions")
+            model = os.getenv("LLM_MODEL", "gpt-4o-mini")
             try:
-                if "LLM_API_KEY" in st.secrets: api_key = st.secrets["LLM_API_KEY"]
-                if "LLM_BASE_URL" in st.secrets: base_url = st.secrets["LLM_BASE_URL"]
-                if "LLM_MODEL" in st.secrets: model = st.secrets["LLM_MODEL"]
+                api_key = st.secrets.get("LLM_API_KEY", api_key)
+                base_url = st.secrets.get("LLM_BASE_URL", base_url)
+                model = st.secrets.get("LLM_MODEL", model)
             except Exception:
                 pass
 
-            if api_key:
+            if not api_key:
+                st.error("Research analysis is not configured. Add LLM_API_KEY to Streamlit Secrets and try again.")
+            else:
                 evidence_payload = []
                 for i, row in enumerate(retrieved, 1):
                     evidence_payload.append({
@@ -1067,16 +1054,17 @@ elif page == "Ask the Evidence":
                 prompt = f"""You are an evidence-led product discovery researcher. Answer the research question using ONLY the supplied CSV evidence.
 Research question: {question}
 
-Produce these sections:
-1. Executive answer: answer directly in 2-4 sentences.
-2. Opportunity areas: identify distinct user problems, not generic sentiment. For each, provide evidence count from retrieved records, share of retrieved records (calculate only from supplied records and clarify themes can overlap), user need/friction, and a short evidence-based explanation.
-3. Comparison and prioritization: compare opportunity areas by evidence volume and plausible relevance to the business metric; do not equate volume with severity or impact. Explain the ranking criteria.
-4. Evidence-backed insights: distinguish observed evidence from interpretation and hypothesis. Cite evidence IDs like [E3] for every substantive claim.
-5. Counter-evidence and uncertainty: include conflicting evidence, limitations, and missing data. If the dataset cannot compare continuers vs drop-offs or prove causality, say so explicitly.
-6. Validation plan: suggest concrete next research or product-data checks needed to validate the leading hypotheses.
-7. Metric connection: cautiously connect to the goal: first-time mutual-fund investors who still have at least one successful SIP instalment in the 30 days around month 12. Do not claim the feedback proves impact.
+Produce a rigorous, high-quality product discovery analysis with these sections:
+1. Executive answer: answer the exact question directly in 2-4 sentences.
+2. Key patterns: identify distinct, question-relevant patterns. For each, state the number of retrieved records supporting it, the denominator, the observed user friction/need, and what the records actually say. Themes may overlap; do not sum them as mutually exclusive.
+3. Evidence comparison: compare patterns using evidence strength (specificity, consistency, source diversity, and counter-evidence), not volume alone. Label interpretations and hypotheses clearly.
+4. Segment analysis: only compare age, income stability, source of money, or influence when those attributes are explicitly present in the supplied records. Otherwise state that the CSV cannot support the requested comparison and identify the missing fields.
+5. Counter-evidence and uncertainty: surface contradictory records, weak matches, missing data, and limits. Do not infer actual SIP continuation outcomes unless explicitly documented.
+6. Product opportunities: propose focused opportunities tied to observed user needs, without pretending they are validated solutions.
+7. Validation plan: propose the next interview, usability, payment, or behavioral-data checks needed.
+8. Metric connection: cautiously relate hypotheses to first-time mutual-fund investors with at least one successful SIP instalment in the 30 days around month 12. Do not claim feedback proves impact.
 
-Rules: Never invent quotes, counts, sources, segments, or causal claims. Use counts only from the supplied evidence. Public feedback is self-selected and not representative. Do not recommend specific funds/stocks or use fear, FOMO, or urgency. Preserve uncertainty. Cite evidence IDs.
+Rules: Use ONLY supplied CSV evidence. Never invent quotes, counts, sources, segments, or causal claims. Cite every substantive evidence claim with IDs like [E3]. Public feedback is self-selected and not representative. Do not recommend specific funds/stocks or use fear, FOMO, or urgency. Be candid when evidence is insufficient. Avoid generic advice and unsupported extrapolation.
 Evidence JSON: {json.dumps(evidence_payload, ensure_ascii=False)}"""
                 payload = json.dumps({
                     "model": model,
@@ -1099,40 +1087,6 @@ Evidence JSON: {json.dumps(evidence_payload, ensure_ascii=False)}"""
                     st.markdown(answer)
                 except Exception as exc:
                     st.error(f"API request failed: {exc}. Retrieved evidence remains available below.")
-            else:
-                # Local, CSV-grounded synthesis: the research workflow remains useful
-                # without an external API key. This is rule-based analysis, not an LLM.
-                st.markdown("### Evidence-based answer (local analysis)")
-                st.caption("Generated from retrieved CSV records using local counts and excerpts; no external API was called.")
-                st.markdown("**Direct answer**")
-                st.write(
-                    f"The retrieved evidence contains {len(retrieved)} records across "
-                    f"{theme_counts.shape[0]} themes and {source_counts.shape[0]} sources. "
-                    "The most represented themes below are candidate problem areas to investigate, "
-                    "not proof that they cause SIP discontinuation or affect the 12-month metric."
-                )
-                st.markdown("**Compared opportunity areas**")
-                theme_table = theme_counts.rename_axis("Theme").reset_index(name="Records")
-                theme_table["Share of retrieved"] = (theme_table["Records"] / len(retrieved)).map(lambda x: f"{x:.1%}")
-                st.dataframe(theme_table.head(10), use_container_width=True, hide_index=True)
-                st.markdown("**Evidence examples**")
-                for i, row in enumerate(retrieved[:5], 1):
-                    st.markdown(f"**E{i} — {row['_label']}**")
-                    st.write(str(row["_text"])[:900])
-                    meta = f"{row['_source']} · Record {row['_id']}"
-                    if str(row["_url"]).strip() and str(row["_url"]).lower() not in {"nan", "none"}:
-                        st.markdown(f"[{meta}]({row['_url']})")
-                    else:
-                        st.caption(meta)
-                st.markdown("**Metric connection and limitations**")
-                st.write(
-                    "These themes may point to friction that could affect whether a first-time investor "
-                    "has at least one successful SIP instalment in the 30 days around month 12. "
-                    "This dataset does not establish causality or reliably distinguish continuers from drop-offs "
-                    "unless those outcomes are explicitly present in the records. Validate leading hypotheses "
-                    "with user interviews and behavioral/payment data."
-                )
-
             st.markdown("### Supporting original feedback")
             for row in retrieved[:15]:
                 with st.container(border=True):
