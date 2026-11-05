@@ -1053,7 +1053,38 @@ Evidence JSON: {json.dumps(evidence_payload, ensure_ascii=False)}"""
                 except Exception as exc:
                     st.error(f"API request failed: {exc}. Retrieved evidence remains available below.")
             else:
-                st.info("No API key configured. The app shows retrieval counts and source evidence, but cannot generate the AI synthesis.")
+                # Local, CSV-grounded synthesis: the research workflow remains useful
+                # without an external API key. This is rule-based analysis, not an LLM.
+                st.markdown("### Evidence-based answer (local analysis)")
+                st.caption("Generated from retrieved CSV records using local counts and excerpts; no external API was called.")
+                st.markdown("**Direct answer**")
+                st.write(
+                    f"The retrieved evidence contains {len(retrieved)} records across "
+                    f"{theme_counts.shape[0]} themes and {source_counts.shape[0]} sources. "
+                    "The most represented themes below are candidate problem areas to investigate, "
+                    "not proof that they cause SIP discontinuation or affect the 12-month metric."
+                )
+                st.markdown("**Compared opportunity areas**")
+                theme_table = theme_counts.rename_axis("Theme").reset_index(name="Records")
+                theme_table["Share of retrieved"] = (theme_table["Records"] / len(retrieved)).map(lambda x: f"{x:.1%}")
+                st.dataframe(theme_table.head(10), use_container_width=True, hide_index=True)
+                st.markdown("**Evidence examples**")
+                for i, row in enumerate(retrieved[:5], 1):
+                    st.markdown(f"**E{i} — {row['_label']}**")
+                    st.write(str(row["_text"])[:900])
+                    meta = f"{row['_source']} · Record {row['_id']}"
+                    if str(row["_url"]).strip() and str(row["_url"]).lower() not in {"nan", "none"}:
+                        st.markdown(f"[{meta}]({row['_url']})")
+                    else:
+                        st.caption(meta)
+                st.markdown("**Metric connection and limitations**")
+                st.write(
+                    "These themes may point to friction that could affect whether a first-time investor "
+                    "has at least one successful SIP instalment in the 30 days around month 12. "
+                    "This dataset does not establish causality or reliably distinguish continuers from drop-offs "
+                    "unless those outcomes are explicitly present in the records. Validate leading hypotheses "
+                    "with user interviews and behavioral/payment data."
+                )
 
             st.markdown("### Supporting original feedback")
             for row in retrieved[:15]:
