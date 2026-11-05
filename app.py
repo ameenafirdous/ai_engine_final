@@ -20,7 +20,6 @@ st.set_page_config(
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
-    menu_items={"About": "Evidence-led discovery for improving first-time SIP continuation."},
 )
 
 ROOT = Path(__file__).resolve().parent
@@ -395,107 +394,24 @@ def show_evidence(row):
         st.markdown(f"[Open original source]({url})")
 
 
-# ------------------------------------------------------------
-# Visual identity: SIP-inspired navy/blue + gold/yellow
-# ------------------------------------------------------------
-if "app_theme" not in st.session_state:
-    st.session_state.app_theme = "Light"
-
-theme_col, _ = st.columns([1, 5])
-with theme_col:
-    st.session_state.app_theme = st.selectbox(
-        "Appearance",
-        ["Light", "Dark"],
-        index=0 if st.session_state.app_theme == "Light" else 1,
-        key="appearance_selector",
-        label_visibility="collapsed",
-    )
-
-if st.session_state.app_theme == "Dark":
-    bg = "#0B1220"
-    panel = "#111C2E"
-    text = "#E8EEF8"
-    muted = "#A8B6CC"
-    border = "#26364D"
-    chart_template = "plotly_dark"
-else:
-    bg = "#F7F9FC"
-    panel = "#FFFFFF"
-    text = "#172B4D"
-    muted = "#5B6B82"
-    border = "#DCE5F0"
-    chart_template = "plotly_white"
-
-st.markdown(
-    f"""
-    <style>
-      :root {{
-        --sip-blue: #174A8B;
-        --sip-blue-bright: #2563EB;
-        --sip-gold: #F4C542;
-        --sip-yellow: #FFE27A;
-        --text-color: {text};
-      }}
-      .stApp {{ background: {bg}; color: {text}; }}
-      [data-testid="stSidebar"] {{ background: {panel}; border-right: 1px solid {border}; }}
-      [data-testid="stSidebar"] * {{ color: {text}; }}
-      h1, h2, h3 {{ color: {text}; }}
-      .sip-hero {{
-        background: linear-gradient(115deg, #123B70 0%, #1D5AA6 62%, #F4C542 150%);
-        color: white; border-radius: 18px; padding: 1.25rem 1.5rem;
-        margin: .2rem 0 1rem 0; border: 1px solid rgba(244,197,66,.35);
-      }}
-      .sip-hero h1 {{ color: white !important; margin: 0 0 .25rem 0; font-size: 1.8rem; }}
-      .sip-hero p {{ color: #EAF2FF; margin: 0; }}
-      div[data-testid="stMetric"] {{
-        background: {panel}; border: 1px solid {border}; padding: .8rem 1rem;
-        border-radius: 14px;
-      }}
-      div[data-testid="stMetricLabel"] {{ color: {muted}; }}
-      .stButton button, .stDownloadButton button {{
-        border-radius: 10px; border: 1px solid #D9AE24;
-      }}
-      .stButton button[kind="primary"], .stDownloadButton button {{
-        background: #F4C542; color: #17345C; font-weight: 700;
-      }}
-      [data-testid="stExpander"] {{ border-color: {border}; border-radius: 12px; }}
-      .sip-empty {{ color: {muted}; text-align: center; padding: 1.5rem; }}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.markdown(
-    """
-    <div class="sip-hero">
-      <h1>💙 INDmoney SIP Discovery Engine <span style="color:#FFE27A">₹</span></h1>
-      <p>Discover evidence-backed opportunities to help first-time investors stay consistent with their SIPs.</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+st.title("INDmoney SIP Discovery Engine")
+st.caption("Evidence-led exploration of user feedback to understand SIP continuation and drop-off.")
 
 with st.sidebar:
-    st.markdown("## 🪙 Navigation")
+    st.header("Navigation")
     page = st.radio(
         "Choose a section",
         [
-            "Dashboard",
-            "Failure Explorer",
-            "Pattern Explorer",
-            "Candidate Problem Areas",
-            "Evidence Explorer",
-            "Ask the Evidence",
-            "Insights",
-            "Opportunity Areas",
-            "Pipeline",
-            "Quality & Integrity",
+            "Research Overview", "Dashboard", "Primary Research", "Contradictions & Gaps",
+            "Failure Explorer", "Pattern Explorer", "Candidate Problem Areas",
+            "Evidence Explorer", "Ask the Evidence", "Challenge & Insight",
+            "Insight Methodology", "Quality & Integrity", "Insights",
+            "Opportunity Areas", "Pipeline"
         ],
         label_visibility="collapsed",
     )
     st.divider()
-    st.caption("💰 Data source: local CSV file beside app.py.")
-
+    st.caption("Data source: local CSV file in the same folder as app.py.")
 
 csv_path = discover_csv()
 if csv_path is None:
@@ -511,20 +427,11 @@ except Exception as exc:
 
 with st.sidebar:
     st.success(f"Loaded: {csv_path.name}")
-    st.download_button(
-        "⬇️ Download dataset CSV",
-        data=raw_df.to_csv(index=False).encode("utf-8-sig"),
-        file_name="indmoney_sip_feedback.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
     st.metric("Feedback records", f"{len(data):,}")
     if columns["label"]:
         st.caption(f"Theme column: {columns['label']}")
     else:
         st.warning("No theme/label column detected. Opportunity analysis will use 'Unlabelled'.")
-
-px.defaults.template = chart_template
 
 # Filters are intentionally available only on the Dashboard.
 if page == "Dashboard":
@@ -866,6 +773,90 @@ elif page == "Ask AI":
                     "- **Validation:** inspect the original quote and source link, then hand-label a sample and record agreement in the AI Evidence Log."
                 )
 
+elif page == "Research Overview":
+    st.subheader("Research overview")
+    st.caption("A snapshot of the evidence base and the research question.")
+    n = len(data)
+    date_values = data["_date"].dropna()
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Feedback records", f"{n:,}")
+    c2.metric("Sources", f"{data['_source'].nunique():,}")
+    c3.metric("Themes / labels", f"{data['_label'].nunique():,}")
+    c4.metric("Dated records", f"{len(date_values):,}")
+    st.markdown("### Research objective")
+    st.write("Identify and compare potential product opportunity areas that may influence the share of first-time mutual-fund investors who still have an active SIP 12 months after starting their first SIP.")
+    st.info("Active SIP definition: at least one successful instalment in the 30 days around the 12-month measurement point. This feedback dataset does not directly measure that outcome.")
+    left, right = st.columns(2)
+    with left:
+        st.markdown("#### Evidence coverage")
+        src_counts = data["_source"].value_counts().rename_axis("Source").reset_index(name="Records")
+        st.dataframe(src_counts, use_container_width=True, hide_index=True)
+    with right:
+        st.markdown("#### Most common recorded labels")
+        lbl_counts = data["_label"].value_counts().head(10).rename_axis("Theme").reset_index(name="Records")
+        st.dataframe(lbl_counts, use_container_width=True, hide_index=True)
+    st.markdown("#### Current research questions")
+    st.markdown("\\n".join(f"- {q}" for q in PRESET_QUESTIONS[:6]))
+    st.caption("Counts describe this collected dataset, not all INDmoney investors.")
+
+elif page == "Primary Research":
+    st.subheader("Primary research")
+    st.caption("No interview or survey records are inferred from public feedback. Add primary-research notes only when collected.")
+    st.warning("Primary research data was not identified in the loaded CSV. This section intentionally does not fabricate interviews, participants, or findings.")
+    with st.expander("Capture a research session note"):
+        with st.form("primary_research_note"):
+            participant = st.text_input("Participant code (avoid personal identifiers)")
+            method = st.selectbox("Method", ["Interview", "Usability test", "Survey", "Other"])
+            date = st.date_input("Research date")
+            note = st.text_area("Research notes / direct observations")
+            submitted = st.form_submit_button("Save note to session")
+            if submitted:
+                st.session_state.setdefault("primary_notes", [])
+                st.session_state["primary_notes"].append({
+                    "participant": participant or "Unspecified",
+                    "method": method, "date": str(date), "note": note
+                })
+                st.success("Note saved for this app session only.")
+    notes = st.session_state.get("primary_notes", [])
+    if notes:
+        st.markdown("### Session notes")
+        for note in notes:
+            st.container(border=True)
+            st.write(f"{note['method']} · {note['date']} · {note['participant']}")
+            st.write(note["note"])
+
+elif page == "Contradictions & Gaps":
+    st.subheader("Contradictions & gaps")
+    st.caption("Automated term-based candidate detection. Treat these as review queues, not verified contradictions.")
+    pairs = [
+        ("Positive return / growth", ["good return", "profit", "positive return", "growth", "earning"]),
+        ("Negative return / loss", ["loss", "negative return", "down", "decline", "poor return"]),
+        ("Easy / smooth experience", ["easy", "smooth", "simple", "seamless"]),
+        ("Difficult / broken experience", ["difficult", "problem", "issue", "failed", "error"]),
+        ("Continue / long-term intent", ["continue", "long term", "keep investing", "stay invested"]),
+        ("Stop / pause intent", ["stop", "cancel", "pause", "discontinue", "quit"]),
+    ]
+    labels = []
+    for i in range(0, len(pairs), 2):
+        a, b = pairs[i], pairs[i+1]
+        def match_terms(terms):
+            return data["_text"].str.lower().apply(lambda t: any(term in t for term in terms))
+        ma, mb = match_terms(a[1]), match_terms(b[1])
+        ca, cb = int(ma.sum()), int(mb.sum())
+        st.markdown(f"#### {a[0]} vs {b[0]}")
+        x, y = st.columns(2)
+        with x:
+            st.metric(a[0], ca)
+            for _, row in data[ma].head(3).iterrows():
+                with st.container(border=True): show_evidence(row)
+        with y:
+            st.metric(b[0], cb)
+            for _, row in data[mb].head(3).iterrows():
+                with st.container(border=True): show_evidence(row)
+        st.caption("These buckets can overlap and may reflect different contexts or users; compare original records before calling this a contradiction.")
+    st.markdown("### Research gaps to investigate")
+    st.markdown("- Feedback is not linked to actual 12-month SIP continuation outcomes.\\n- Public feedback may overrepresent unusually positive or negative experiences.\\n- The CSV may not distinguish first-time investors from experienced investors.\\n- Reasons inferred from keyword matches require manual coding and user follow-up.")
+
 elif page == "Failure Explorer":
     st.subheader("Failure explorer")
     st.caption("Explore potential SIP journey failures using transparent keyword screens.")
@@ -1021,6 +1012,44 @@ elif page == "Ask the Evidence":
             theme_summary = pd.DataFrame([r[2] for r in results])["_label"].value_counts().rename_axis("Theme").reset_index(name="Retrieved records")
             st.dataframe(theme_summary, use_container_width=True, hide_index=True)
 
+elif page == "Challenge & Insight":
+    st.subheader("Challenge & insight")
+    st.caption("Use this workspace to test a proposed insight against supporting and opposing evidence.")
+    insight = st.text_area("Proposed insight", placeholder="Payment uncertainty may interrupt SIP continuation.")
+    terms = st.text_input("Search terms for supporting evidence", placeholder="payment, mandate, failed")
+    counter_terms = st.text_input("Search terms for counter-evidence", placeholder="successful, easy, resolved")
+    if st.button("Find evidence for and against", key="challenge_button"):
+        def find_terms(term_string):
+            ts = [t.strip().lower() for t in term_string.split(",") if t.strip()]
+            mask = data["_text"].str.lower().apply(lambda text: any(t in text for t in ts)) if ts else pd.Series(False, index=data.index)
+            return data[mask]
+        support = find_terms(terms)
+        counter = find_terms(counter_terms)
+        left, right = st.columns(2)
+        with left:
+            st.markdown(f"### Supporting candidates ({len(support)})")
+            for _, row in support.head(8).iterrows():
+                with st.container(border=True): show_evidence(row)
+        with right:
+            st.markdown(f"### Counter-evidence candidates ({len(counter)})")
+            for _, row in counter.head(8).iterrows():
+                with st.container(border=True): show_evidence(row)
+        st.warning("Keyword matches are candidate evidence. Manually verify relevance and whether records genuinely contradict the proposed insight.")
+
+elif page == "Insight Methodology":
+    st.subheader("Insight methodology")
+    st.markdown("""
+    1. **Load:** identify feedback text and available source/date/label/URL/ID fields.
+    2. **Retrieve:** rank records using question-token overlap, synonym expansion, and label matches.
+    3. **Count:** report retrieved records and keyword-screen counts with explicit denominators.
+    4. **Interpret:** distinguish evidence from interpretation and opportunity hypotheses.
+    5. **Validate:** inspect original quotes, source links, and counter-evidence; hand-label a sample.
+    6. **Connect:** treat relevance to 12-month active SIP continuation as a hypothesis unless linked behavioral outcomes exist.
+    """)
+    st.markdown("### Retrieval scoring")
+    st.code("score = 4 × direct text-token overlap + 2 × expanded overlap + 7 × direct label overlap + 4 × expanded label overlap + concept boosts")
+    st.caption("This is a heuristic ranking, not a semantic model or validated classifier.")
+
 elif page == "Quality & Integrity":
     st.subheader("Quality & integrity")
     n = len(data)
@@ -1039,3 +1068,52 @@ elif page == "Quality & Integrity":
     st.markdown("### Integrity rules")
     st.markdown("- Original feedback text is displayed without rewriting.\\n- Keyword matches are directional and may overlap.\\n- Retrieved feedback is self-selected and not necessarily representative.\\n- Theme labels may be unverified; inspect source text.\\n- No causal effect or 12-month retention rate is calculated from this dataset.\\n- API-generated synthesis, when configured, is grounded in retrieved excerpts but still requires human verification.")
 
+elif page == "Evidence Browser":
+    st.subheader("Evidence browser")
+    st.caption("Use dropdowns to filter by year, platform, and assigned theme.")
+
+    browser = data.copy()
+    date_mask = browser["_date"].notna()
+    if date_mask.any():
+        years = sorted(browser.loc[date_mask, "_date"].dt.year.unique().tolist(), reverse=True)
+    else:
+        years = []
+
+    year_options = ["All years"] + years
+    platform_options = ["All platforms"] + sorted(browser["_source"].dropna().unique().tolist())
+    theme_options = ["All themes"] + sorted(browser["_label"].dropna().unique().tolist())
+
+    col_year, col_platform, col_theme = st.columns(3)
+    with col_year:
+        selected_year = st.selectbox("Year", year_options, key="evidence_year")
+    with col_platform:
+        selected_platform = st.selectbox("Platform", platform_options, key="evidence_platform")
+    with col_theme:
+        selected_theme = st.selectbox("Theme / label", theme_options, key="evidence_theme")
+
+    if selected_year != "All years":
+        browser = browser[browser["_date"].dt.year == int(selected_year)]
+    if selected_platform != "All platforms":
+        browser = browser[browser["_source"] == selected_platform]
+    if selected_theme != "All themes":
+        browser = browser[browser["_label"] == selected_theme]
+
+    search = st.text_input(
+        "Optional text search",
+        placeholder="Search within the filtered feedback…",
+        key="evidence_search",
+    )
+    if search.strip():
+        browser = browser[
+            browser["_text"].str.contains(re.escape(search.strip()), case=False, na=False)
+        ]
+
+    browser = browser.sort_values("_date", ascending=False, na_position="last")
+    st.caption(f"{len(browser):,} matching records · displaying up to 100")
+
+    if browser.empty:
+        st.info("No feedback matches these dropdown selections.")
+    else:
+        for _, row in browser.head(100).iterrows():
+            with st.container(border=True):
+                show_evidence(row)
