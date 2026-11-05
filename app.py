@@ -499,26 +499,114 @@ if filtered.empty:
     st.stop()
 
 if page == "Dashboard":
-    st.subheader("Dataset overview")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Feedback records", f"{len(filtered):,}")
-    c2.metric("Sources", f"{filtered['_source'].nunique():,}")
-    c3.metric("Themes", f"{filtered['_label'].nunique():,}")
-    date_values = filtered["_date"].dropna()
-    c4.metric("Date range", f"{date_values.min():%b %Y} – {date_values.max():%b %Y}" if len(date_values) else "Not available")
+    # Editorial dashboard: all metrics are computed from the loaded CSV.
+    st.markdown("""
+    <style>
+    .dash-hero {padding: 1.35rem 1.5rem; border-radius: 18px;
+        background: linear-gradient(115deg, #102a43 0%, #174b62 58%, #247b78 100%);
+        color: #ffffff; margin: .25rem 0 1.15rem 0;}
+    .dash-eyebrow {font-size: .74rem; letter-spacing: .14em; text-transform: uppercase;
+        opacity: .78; font-weight: 700; margin-bottom: .45rem;}
+    .dash-hero h2 {color: #ffffff; font-size: 1.8rem; line-height: 1.15; margin: 0 0 .45rem 0;}
+    .dash-hero p {color: #e5f3f4; font-size: .96rem; margin: 0; max-width: 850px;}
+    .dash-kpi {border: 1px solid rgba(100,116,139,.22); border-radius: 15px;
+        padding: 1rem 1.1rem; min-height: 118px; background: rgba(148,163,184,.045);}
+    .dash-kpi-label {font-size: .78rem; color: #64748b; font-weight: 700; letter-spacing: .04em;}
+    .dash-kpi-value {font-size: 1.85rem; font-weight: 800; line-height: 1.25; margin: .35rem 0; color: var(--text-color);}
+    .dash-kpi-note {font-size: .78rem; color: #64748b;}
+    .dash-section {font-size: 1.15rem; font-weight: 750; margin: 1.15rem 0 .25rem 0;}
+    .dash-feature {border: 1px solid rgba(20,184,166,.35); border-radius: 15px;
+        padding: 1rem 1.15rem; background: rgba(20,184,166,.06);}
+    .dash-feature-title {font-weight: 750; font-size: 1.05rem; margin-bottom: .3rem;}
+    .dash-feature-meta {font-size: .85rem; color: #64748b;}
+    </style>
+    """, unsafe_allow_html=True)
 
-    left, right = st.columns(2)
+    st.markdown(f"""
+    <div class="dash-hero">
+      <div class="dash-eyebrow">INDmoney · SIP discovery</div>
+      <h2>Understand what makes SIP continuation difficult.</h2>
+      <p>Explore the feedback in your loaded dataset, identify recurring friction signals, and open the original records before turning patterns into product hypotheses.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    n_records = len(filtered)
+    n_sources = filtered["_source"].nunique()
+    n_themes = filtered["_label"].nunique()
+    n_dated = int(filtered["_date"].notna().sum())
+    date_values = filtered["_date"].dropna()
+    date_range = f"{date_values.min():%b %Y} – {date_values.max():%b %Y}" if len(date_values) else "Dates unavailable"
+    kpis = [
+        ("FEEDBACK RECORDS", f"{n_records:,}", "Loaded from the selected CSV"),
+        ("SOURCES", f"{n_sources:,}", "Distinct source labels"),
+        ("RECORDED THEMES", f"{n_themes:,}", "Distinct labels in this dataset"),
+        ("DATED RECORDS", f"{n_dated:,}", date_range),
+    ]
+    cols = st.columns(4, gap="medium")
+    for col, (label, value, note) in zip(cols, kpis):
+        with col:
+            st.markdown(f'<div class="dash-kpi"><div class="dash-kpi-label">{label}</div><div class="dash-kpi-value">{value}</div><div class="dash-kpi-note">{note}</div></div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="dash-section">What stands out in this dataset</div>', unsafe_allow_html=True)
+    st.caption("The highlighted theme is the most frequent recorded label in the currently selected data. Frequency is a discovery signal—not proof of severity or causality.")
+    label_counts = filtered["_label"].value_counts()
+    if len(label_counts):
+        top_label = str(label_counts.index[0])
+        top_count = int(label_counts.iloc[0])
+        top_share = top_count / max(1, n_records)
+        feature_html = (f'<div class="dash-feature"><div class="dash-feature-title">{top_label}</div>'
+                       f'<div class="dash-feature-meta"><strong>{top_count:,}</strong> records · '
+                       f'<strong>{top_share:.1%}</strong> of the filtered dataset</div></div>')
+        st.markdown(feature_html, unsafe_allow_html=True)
+
+    left, right = st.columns([1.05, 1.35], gap="large")
     with left:
+        st.markdown('<div class="dash-section">Where feedback comes from</div>', unsafe_allow_html=True)
         source_counts = filtered["_source"].value_counts().rename_axis("Source").reset_index(name="Records")
-        st.plotly_chart(px.bar(source_counts, x="Source", y="Records", title="Feedback by source"), use_container_width=True)
+        source_counts["Share"] = source_counts["Records"] / max(1, n_records)
+        pie = px.pie(source_counts, names="Source", values="Records", hole=0.58, title="Source mix", custom_data=["Share"])
+        pie.update_traces(hovertemplate="%{label}<br>%{value:,} records (%{customdata[0]:.1%})<extra></extra>")
+        st.plotly_chart(pie, use_container_width=True)
+        st.dataframe(source_counts[["Source", "Records", "Share"]].style.format({"Share": "{:.1%}"}),
+                     use_container_width=True, hide_index=True)
     with right:
-        theme_counts = filtered["_label"].value_counts().head(12).rename_axis("Theme").reset_index(name="Records")
-        st.plotly_chart(px.bar(theme_counts, x="Records", y="Theme", orientation="h", title="Top feedback themes"), use_container_width=True)
+        st.markdown('<div class="dash-section">Most common recorded themes</div>', unsafe_allow_html=True)
+        theme_counts = filtered["_label"].value_counts().head(10).rename_axis("Theme").reset_index(name="Records")
+        chart = px.bar(theme_counts.sort_values("Records"), x="Records", y="Theme", orientation="h",
+                       title="Top 10 themes", text="Records")
+        chart.update_traces(textposition="outside")
+        st.plotly_chart(chart, use_container_width=True)
+
+    st.markdown('<div class="dash-section">SIP continuity signals</div>', unsafe_allow_html=True)
+    st.caption("Transparent keyword screens over original feedback. Categories can overlap; review quotes before treating these as validated findings.")
+    signal_defs = {
+        "Pause / stop / cancellation": ["pause", "paused", "stop sip", "stopped sip", "cancel", "cancellation", "discontinue"],
+        "Payment / mandate friction": ["payment failed", "failed payment", "mandate", "autopay", "auto debit", "debit failed"],
+        "Cash-flow / affordability": ["salary", "insufficient balance", "low balance", "cash flow", "emergency", "expense", "reduce sip"],
+        "Returns / uncertainty": ["negative return", "loss", "market fall", "volatility", "risk", "fear", "uncertain"],
+    }
+    signal_rows = []
+    text_series = filtered["_text"].fillna("").astype(str).str.lower()
+    for signal, terms in signal_defs.items():
+        mask = text_series.apply(lambda text: any(term in text for term in terms))
+        count = int(mask.sum())
+        signal_rows.append({"Signal": signal, "Keyword matches": count, "Share of dataset": count / max(1, n_records)})
+    signal_df = pd.DataFrame(signal_rows).sort_values("Keyword matches", ascending=False)
+    signal_cols = st.columns(4, gap="medium")
+    for col, (_, row) in zip(signal_cols, signal_df.iterrows()):
+        with col:
+            st.markdown(f'<div class="dash-kpi"><div class="dash-kpi-label">{row["Signal"]}</div><div class="dash-kpi-value">{int(row["Keyword matches"]):,}</div><div class="dash-kpi-note">{row["Share of dataset"]:.1%} keyword-matched</div></div>', unsafe_allow_html=True)
+    st.dataframe(signal_df, use_container_width=True, hide_index=True,
+                 column_config={"Share of dataset": st.column_config.NumberColumn(format="%.1f%%")})
 
     if filtered["_date"].notna().any():
+        st.markdown('<div class="dash-section">Feedback over time</div>', unsafe_allow_html=True)
         trend = filtered.dropna(subset=["_date"]).assign(Month=lambda x: x["_date"].dt.to_period("M").astype(str))
         trend = trend.groupby("Month").size().reset_index(name="Records")
-        st.plotly_chart(px.line(trend, x="Month", y="Records", markers=True, title="Feedback over time"), use_container_width=True)
+        st.plotly_chart(px.area(trend, x="Month", y="Records", markers=True, title="Monthly feedback volume"),
+                        use_container_width=True)
+
+    st.caption("All counts are calculated from the CSV currently loaded and any active Dashboard filters. The feedback is self-selected and does not directly measure 12-month active-SIP continuation.")
 
 elif page == "Insights":
     st.subheader("Insights from the collected feedback")
