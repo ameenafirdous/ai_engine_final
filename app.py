@@ -1031,13 +1031,13 @@ elif page == "Ask the Evidence":
 
             # Read credentials/configuration from Streamlit Secrets (or deployment env).
             # Never expose or ask the user to paste secrets into the research UI.
-            api_key = os.getenv("LLM_API_KEY", "")
-            base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1/chat/completions")
-            model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+            api_key = os.getenv("TOKENHARBOR_API_KEY", "")
+            base_url = os.getenv("TOKENHARBOR_BASE_URL", "https://api.openai.com/v1/chat/completions")
+            model = os.getenv("TOKENHARBOR_MODEL", "gpt-4o-mini")
             try:
-                api_key = st.secrets.get("LLM_API_KEY", api_key)
-                base_url = st.secrets.get("LLM_BASE_URL", base_url)
-                model = st.secrets.get("LLM_MODEL", model)
+                api_key = st.secrets.get("TOKENHARBOR_API_KEY", api_key)
+                base_url = st.secrets.get("TOKENHARBOR_BASE_URL", base_url)
+                model = st.secrets.get("TOKENHARBOR_MODEL", model)
             except Exception:
                 pass
 
