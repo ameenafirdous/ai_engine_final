@@ -614,9 +614,9 @@ elif page == "Ask AI":
                     )
 
                 st.markdown("#### Supporting user feedback")
-                for score, idx, row in results[:12]:
+                for item in results[:12]:
                     with st.container(border=True):
-                        show_evidence(row)
+                        show_evidence(item[2])
 
                 st.info(
                     "Review the original quotes before reporting a conclusion. "
