@@ -952,18 +952,53 @@ elif page == "Evidence Explorer":
 
 elif page == "Ask the Evidence":
     st.subheader("Ask the evidence")
-    st.caption("Evidence-grounded synthesis. Configure an OpenAI-compatible API using environment variables or Streamlit secrets; otherwise the app displays a local evidence summary.")
-    question = st.text_area("Research question", key="ask_evidence_question", placeholder="What might make first-time investors stop or pause their SIP?")
+    st.caption(
+        "Choose a research question or write your own. The workflow retrieves CSV evidence, "
+        "compares opportunity areas, quantifies retrieved records where possible, and "
+        "returns an evidence-cited analysis—not just sentiment or a review summary."
+    )
+
+    research_questions = {
+        "Identify opportunity areas": "Which user problems in the CSV are the strongest potential opportunity areas for improving 12-month SIP continuation? Identify themes, quantify retrieved evidence, compare opportunities, and cite records.",
+        "Why do investors pause or stop SIPs?": "What reasons do users give for pausing, reducing, or stopping SIPs? Group reasons into themes, count retrieved records per theme, compare their prominence, and cite supporting and contradictory evidence.",
+        "Payment and mandate failure points": "What payment, autopay, mandate, or failed-instalment problems appear in the feedback? Quantify and compare problem types, describe user impact, and cite evidence.",
+        "Affordability and cash-flow constraints": "How do affordability, salary timing, insufficient balance, or emergencies affect SIP continuity? Identify and compare patterns with counts and citations.",
+        "Returns, losses, and uncertainty": "How do returns, losses, market uncertainty, or risk concerns relate to SIP continuation or discontinuation in the feedback? Compare themes, quantify evidence, and cite examples.",
+        "App clarity, status, and trust": "What app usability, SIP status, transaction, support, or trust issues could interfere with SIP continuation? Rank evidence-backed problem areas and cite records.",
+        "Compare continuers and drop-offs": "What differences between SIP continuers and drop-offs are actually supported by this dataset? Identify available evidence, quantify where possible, and clearly state when the dataset cannot distinguish these groups.",
+        "Find contradictions and evidence gaps": "What evidence supports or challenges the leading SIP continuation hypotheses? Identify contradictions, missing information, and the next validation questions.",
+        "Metric-linked opportunity prioritization": "Compare the leading potential opportunity areas for their plausible connection to the 12-month active-SIP continuation metric. Show evidence volume, user problem, hypothesized mechanism, confidence, counter-evidence, and what must be validated. Do not claim causality.",
+    }
+    selected_question = st.selectbox(
+        "Pre-built research questions", ["Choose a question…"] + list(research_questions.keys()),
+        key="ask_evidence_preset"
+    )
+    if selected_question != "Choose a question…":
+        st.session_state["ask_evidence_question"] = research_questions[selected_question]
+    question = st.text_area(
+        "Research question", key="ask_evidence_question", height=120,
+        placeholder="Choose a preset or ask your own evidence-based research question."
+    )
+
     if st.button("Analyze evidence", type="primary", key="ask_evidence_button"):
-        results = rank_evidence(data, question, limit=30) if question.strip() else []
+        results = rank_evidence(data, question, limit=40) if question.strip() else []
         if not results:
             st.warning("Enter a question and ensure the CSV contains relevant feedback.")
         else:
             retrieved = [item[2] for item in results]
-            st.markdown("### Evidence retrieved")
-            st.write(f"{len(retrieved)} records retrieved from {len(data)} total records.")
-            for row in retrieved[:10]:
-                with st.container(border=True): show_evidence(row)
+            matched = pd.DataFrame(retrieved)
+            theme_counts = matched["_label"].value_counts()
+            source_counts = matched["_source"].value_counts()
+            st.markdown("### Retrieved evidence")
+            st.write(f"Retrieved **{len(retrieved)} records** from **{len(data):,} total CSV records**. These are retrieval counts, not population estimates.")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Retrieved records by theme**")
+                st.dataframe(theme_counts.rename_axis("Theme").reset_index(name="Records"), use_container_width=True, hide_index=True)
+            with col2:
+                st.markdown("**Retrieved records by source**")
+                st.dataframe(source_counts.rename_axis("Source").reset_index(name="Records"), use_container_width=True, hide_index=True)
+
             api_key = os.getenv("LLM_API_KEY", "")
             base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1/chat/completions")
             model = os.getenv("LLM_MODEL", "gpt-4o-mini")
@@ -973,27 +1008,33 @@ elif page == "Ask the Evidence":
                 if "LLM_MODEL" in st.secrets: model = st.secrets["LLM_MODEL"]
             except Exception:
                 pass
+
             if api_key:
                 evidence_payload = []
                 for i, row in enumerate(retrieved, 1):
                     evidence_payload.append({
                         "evidence_id": f"E{i}", "text": row["_text"],
                         "source": row["_source"], "date": str(row["_date"]),
-                        "label": row["_label"], "record_id": row["_id"], "url": row["_url"]
+                        "theme": row["_label"], "record_id": row["_id"], "url": row["_url"]
                     })
-                prompt = (
-                    "You are a rigorous product discovery research analyst. Answer only from supplied CSV evidence. "
-                    "Never invent quotes, counts, causal claims, or missing attributes. Separate observations, "
-                    "interpretations, and hypotheses. Counts in evidence are retrieved-record counts, not population estimates. "
-                    "Cite evidence IDs (E1 etc.) for every substantive claim. Discuss counter-evidence and limitations. "
-                    "Connect cautiously to the business metric: first-time investors with >=1 successful SIP instalment "
-                    "in the 30 days around month 12. Do not recommend specific funds or use fear/FOMO. "
-                    f"Research question: {question}\\nEvidence JSON: {json.dumps(evidence_payload, ensure_ascii=False)}"
-                )
+                prompt = f"""You are an evidence-led product discovery researcher. Answer the research question using ONLY the supplied CSV evidence.
+Research question: {question}
+
+Produce these sections:
+1. Executive answer: answer directly in 2-4 sentences.
+2. Opportunity areas: identify distinct user problems, not generic sentiment. For each, provide evidence count from retrieved records, share of retrieved records (calculate only from supplied records and clarify themes can overlap), user need/friction, and a short evidence-based explanation.
+3. Comparison and prioritization: compare opportunity areas by evidence volume and plausible relevance to the business metric; do not equate volume with severity or impact. Explain the ranking criteria.
+4. Evidence-backed insights: distinguish observed evidence from interpretation and hypothesis. Cite evidence IDs like [E3] for every substantive claim.
+5. Counter-evidence and uncertainty: include conflicting evidence, limitations, and missing data. If the dataset cannot compare continuers vs drop-offs or prove causality, say so explicitly.
+6. Validation plan: suggest concrete next research or product-data checks needed to validate the leading hypotheses.
+7. Metric connection: cautiously connect to the goal: first-time mutual-fund investors who still have at least one successful SIP instalment in the 30 days around month 12. Do not claim the feedback proves impact.
+
+Rules: Never invent quotes, counts, sources, segments, or causal claims. Use counts only from the supplied evidence. Public feedback is self-selected and not representative. Do not recommend specific funds/stocks or use fear, FOMO, or urgency. Preserve uncertainty. Cite evidence IDs.
+Evidence JSON: {json.dumps(evidence_payload, ensure_ascii=False)}"""
                 payload = json.dumps({
                     "model": model,
                     "messages": [
-                        {"role": "system", "content": "Be evidence-grounded, concise, and explicit about uncertainty."},
+                        {"role": "system", "content": "Be rigorous, transparent, concise, and evidence-grounded. Never fabricate evidence."},
                         {"role": "user", "content": prompt}
                     ],
                     "temperature": 0.2
@@ -1007,15 +1048,18 @@ elif page == "Ask the Evidence":
                     with urllib.request.urlopen(req, timeout=60) as response:
                         result = json.loads(response.read().decode("utf-8"))
                     answer = result["choices"][0]["message"]["content"]
-                    st.markdown("### AI synthesis")
+                    st.markdown("### AI research answer")
                     st.markdown(answer)
                 except Exception as exc:
-                    st.error(f"API request failed: {exc}. Showing retrieved evidence only.")
+                    st.error(f"API request failed: {exc}. Retrieved evidence remains available below.")
             else:
-                st.info("No API key configured. Showing evidence retrieval only; no generative AI answer was produced.")
-            st.markdown("### Evidence coverage")
-            theme_summary = pd.DataFrame([r[2] for r in results])["_label"].value_counts().rename_axis("Theme").reset_index(name="Retrieved records")
-            st.dataframe(theme_summary, use_container_width=True, hide_index=True)
+                st.info("No API key configured. The app shows retrieval counts and source evidence, but cannot generate the AI synthesis.")
+
+            st.markdown("### Supporting original feedback")
+            for row in retrieved[:15]:
+                with st.container(border=True):
+                    show_evidence(row)
+            st.caption("Review original quotes and links before accepting an insight. Retrieved counts are not population estimates; evidence suggests hypotheses, not causality.")
 
 elif page == "Challenge & Insight":
     st.subheader("Challenge & insight")
