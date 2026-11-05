@@ -32,15 +32,15 @@ CSV_CANDIDATES = [
 ]
 
 PRESET_QUESTIONS = [
-    "Why do first-time investors start SIPs, and what do they expect?",
-    "What motivates investors to continue their SIPs?",
-    "What are the reasons investors pause, reduce, or stop SIPs?",
-    "What payment, autopay, or mandate issues affect SIP continuity?",
-    "How do affordability and cash-flow constraints affect SIPs?",
-    "What concerns do investors express about returns, losses, or risk?",
-    "What app, support, or trust issues appear in the feedback?",
-    "What confuses investors about SIP status, transactions, units, or NAV?",
-    "What differences or patterns appear between SIP continuers and drop-offs?",
+    "Why do people start a SIP, and what do they expect to happen?",
+    "What changes in their behaviour in the months after starting?",
+    "What leads investors to pause, reduce or stop a SIP?",
+    "What do investors check, and how often, once they have started?",
+    "What confuses or worries them inside the app?",
+    "What do they do outside the app when they feel unsure?",
+    "What separates investors who continue from those who quietly drop off?",
+    "How do these patterns differ across user segments (income stability, age, source of money, who influenced them)?",
+    "What unmet needs emerge consistently across conversations?",
 ]
 
 THEME_OPPORTUNITIES = {
@@ -230,56 +230,85 @@ QUERY_CONCEPTS = {
 }
 
 
-def rank_evidence(df, question, limit=40):
-    """Rank records using direct question terms, synonym expansion, and labels."""
+def question_profile(question):
+    """Return a narrow retrieval profile inferred from the research question."""
     q = norm(question)
+    profiles = [
+        ("start_expectations", ["start", "started", "begin", "expect", "expectation", "why do people start"]),
+        ("behaviour_change", ["behaviour", "behavior", "months after", "after starting", "change in"]),
+        ("pause_reduce_stop", ["pause", "reduce", "stop", "stopping", "cancel", "discontinu"]),
+        ("monitoring", ["check", "checks", "how often", "monitor", "track", "look at"]),
+        ("in_app_confusion", ["confus", "worr", "inside the app", "app", "status", "transaction"]),
+        ("outside_app", ["outside the app", "when they feel unsure", "ask others", "youtube", "reddit", "advisor"]),
+        ("continuers_dropoffs", ["continue", "drop off", "drop-off", "quietly drop", "continuers"]),
+        ("segments", ["user segments", "income stability", "age", "source of money", "influenced them"]),
+        ("unmet_needs", ["unmet needs", "needs emerge", "across conversations"]),
+        ("affordability", ["afford", "salary", "cash flow", "cash-flow", "insufficient balance", "emergency"]),
+        ("payments", ["payment", "mandate", "autopay", "failed instalment", "failed installment"]),
+        ("returns_risk", ["return", "loss", "market", "risk", "volatility"]),
+    ]
+    for profile, phrases in profiles:
+        if any(phrase in q for phrase in phrases):
+            return profile
+    return "custom"
+
+
+PROFILE_ANCHORS = {
+    "start_expectations": ["started sip", "start sip", "started investing", "first sip", "goal", "retirement", "wealth", "future", "expect", "expectation", "beginner", "recommend", "suggested"],
+    "behaviour_change": ["after starting", "started checking", "check daily", "check frequently", "increase", "decrease", "changed", "habit", "regular", "monthly", "missed", "paused", "stopped", "continue", "track", "monitor"],
+    "pause_reduce_stop": ["pause", "paused", "stop sip", "stopped sip", "cancel sip", "cancelled sip", "canceled sip", "reduce sip", "reduced amount", "discontinue", "missed instalment", "missed installment", "not enough balance", "salary", "emergency", "expense"],
+    "monitoring": ["check", "checking", "track", "tracking", "portfolio", "returns", "nav", "units", "sip status", "transaction", "daily", "weekly", "monthly", "frequently", "every day"],
+    "in_app_confusion": ["confus", "unclear", "not understand", "don't understand", "cannot understand", "status", "pending", "mandate", "nav", "units", "portfolio value", "error", "issue", "problem", "support"],
+    "outside_app": ["youtube", "reddit", "google", "search online", "friend", "friends", "family", "advisor", "adviser", "financial planner", "whatsapp", "telegram", "ask someone", "outside the app"],
+    "continuers_dropoffs": ["continue sip", "continued sip", "stopped sip", "stop sip", "cancel sip", "regular sip", "missed instalment", "missed installment", "discipline", "goal", "salary", "income", "returns", "loss", "emergency"],
+    "segments": ["salary", "income", "age", "young", "retire", "parent", "family", "bonus", "business income", "irregular income", "influenced", "friend", "family", "advisor", "first salary", "student"],
+    "unmet_needs": ["wish", "need", "would like", "should have", "missing", "feature", "help", "support", "confus", "unclear", "unable", "cannot", "could not", "frustrat", "problem", "issue"],
+    "affordability": ["salary", "payday", "income", "insufficient balance", "low balance", "not enough balance", "cash flow", "cashflow", "afford", "affordable", "emergency", "medical", "unexpected expense", "financial problem", "reduce sip", "reduce amount", "missed instalment", "missed installment"],
+    "payments": ["payment failed", "failed payment", "autopay", "auto debit", "mandate", "bank debit", "debit failed", "instalment failed", "installment failed", "payment pending"],
+    "returns_risk": ["negative return", "loss", "market fall", "market crash", "volatility", "risk", "fear", "uncertain", "down market", "returns", "profit"],
+}
+
+
+def rank_evidence(df, question, limit=40):
+    """Precision-first retrieval: require question-specific anchors, then rank matches."""
+    q = norm(question)
+    profile = question_profile(question)
+    anchors = PROFILE_ANCHORS.get(profile, [])
     q_tokens = tokens(question)
-    expanded = set(q_tokens)
-    concepts = []
-
-    for concept, terms in QUERY_CONCEPTS.items():
-        if concept in q:
-            concepts.append(concept)
-            for term in terms:
-                expanded.update(tokens(term))
-
-    if any(term in q for term in ["motivat", "continu", "stay invested"]):
-        for concept in ["continue", "motivat"]:
-            concepts.append(concept)
-            expanded.update(tokens(" ".join(QUERY_CONCEPTS[concept])))
-
     ranked = []
+
     for idx, row in df.iterrows():
         text = str(row["_text"])
         label = str(row["_label"])
         text_norm, label_norm = norm(text), norm(label)
         text_tokens, label_tokens = tokens(text), tokens(label)
+        matched_anchors = [a for a in anchors if norm(a) in text_norm]
 
-        direct = len(q_tokens & text_tokens)
-        expanded_overlap = len(expanded & text_tokens)
-        label_direct = len(q_tokens & label_tokens)
-        label_expanded = len(expanded & label_tokens)
-
-        score = 4 * direct + 2 * expanded_overlap + 7 * label_direct + 4 * label_expanded
-
-        for concept in set(concepts):
-            terms = QUERY_CONCEPTS.get(concept, [])
-            if any(norm(term) in label_norm for term in terms):
-                score += 8
-            if any(norm(term) in text_norm for term in terms):
-                score += 2
-
-        if q and q in text_norm:
-            score += 8
-
-        # Avoid matches caused only by generic expanded terms.
-        if direct == 0 and label_direct == 0 and expanded_overlap < 2 and label_expanded == 0:
-            score = 0
+        if profile != "custom":
+            # For known questions, incidental overlap with generic terms or labels
+            # is not enough: require at least one specific anchor in the original text.
+            if not matched_anchors:
+                continue
+            score = sum(5 + min(len(a.split()), 3) for a in matched_anchors)
+            score += 2 * len(q_tokens & text_tokens)
+            if any(norm(a) in label_norm for a in anchors):
+                score += 1  # labels are a weak tie-breaker, never retrieval evidence
+        else:
+            expanded = set(q_tokens)
+            for concept, terms in QUERY_CONCEPTS.items():
+                if concept in q:
+                    expanded.update(tokens(" ".join(terms)))
+            direct = len(q_tokens & text_tokens)
+            overlap = len(expanded & text_tokens)
+            if direct == 0 and overlap < 2:
+                continue
+            score = 4 * direct + 2 * overlap
+            matched_anchors = [t for t in sorted(q_tokens) if t in text_tokens]
 
         if score > 0:
-            ranked.append((score, idx, row, direct, label_direct + label_expanded))
+            ranked.append((score, idx, row, len(matched_anchors), len(q_tokens & text_tokens)))
 
-    ranked.sort(key=lambda x: (-x[0], -x[4], -x[3], str(x[2].get("_id", ""))))
+    ranked.sort(key=lambda x: (-x[0], -x[3], -x[4], str(x[2].get("_id", ""))))
     return ranked[:limit]
 
 
@@ -959,15 +988,16 @@ elif page == "Ask the Evidence":
     )
 
     research_questions = {
-        "Identify opportunity areas": "Which user problems in the CSV are the strongest potential opportunity areas for improving 12-month SIP continuation? Identify themes, quantify retrieved evidence, compare opportunities, and cite records.",
-        "Why do investors pause or stop SIPs?": "What reasons do users give for pausing, reducing, or stopping SIPs? Group reasons into themes, count retrieved records per theme, compare their prominence, and cite supporting and contradictory evidence.",
-        "Payment and mandate failure points": "What payment, autopay, mandate, or failed-instalment problems appear in the feedback? Quantify and compare problem types, describe user impact, and cite evidence.",
-        "Affordability and cash-flow constraints": "How do affordability, salary timing, insufficient balance, or emergencies affect SIP continuity? Identify and compare patterns with counts and citations.",
-        "Returns, losses, and uncertainty": "How do returns, losses, market uncertainty, or risk concerns relate to SIP continuation or discontinuation in the feedback? Compare themes, quantify evidence, and cite examples.",
-        "App clarity, status, and trust": "What app usability, SIP status, transaction, support, or trust issues could interfere with SIP continuation? Rank evidence-backed problem areas and cite records.",
-        "Compare continuers and drop-offs": "What differences between SIP continuers and drop-offs are actually supported by this dataset? Identify available evidence, quantify where possible, and clearly state when the dataset cannot distinguish these groups.",
-        "Find contradictions and evidence gaps": "What evidence supports or challenges the leading SIP continuation hypotheses? Identify contradictions, missing information, and the next validation questions.",
-        "Metric-linked opportunity prioritization": "Compare the leading potential opportunity areas for their plausible connection to the 12-month active-SIP continuation metric. Show evidence volume, user problem, hypothesized mechanism, confidence, counter-evidence, and what must be validated. Do not claim causality.",
+        "1. Why do people start a SIP, and what do they expect to happen?": PRESET_QUESTIONS[0],
+        "2. What changes in their behaviour in the months after starting?": PRESET_QUESTIONS[1],
+        "3. What leads investors to pause, reduce or stop a SIP?": PRESET_QUESTIONS[2],
+        "4. What do investors check, and how often, once they have started?": PRESET_QUESTIONS[3],
+        "5. What confuses or worries them inside the app?": PRESET_QUESTIONS[4],
+        "6. What do they do outside the app when they feel unsure?": PRESET_QUESTIONS[5],
+        "7. What separates investors who continue from those who quietly drop off?": PRESET_QUESTIONS[6],
+        "8. How do patterns differ across user segments?": PRESET_QUESTIONS[7],
+        "9. What unmet needs emerge consistently across conversations?": PRESET_QUESTIONS[8],
+        "Custom research question": "",
     }
     selected_question = st.selectbox(
         "Pre-built research questions", ["Choose a question…"] + list(research_questions.keys()),
@@ -980,17 +1010,34 @@ elif page == "Ask the Evidence":
         placeholder="Choose a preset or ask your own evidence-based research question."
     )
 
+    with st.expander("Optional AI API settings", expanded=False):
+        st.caption("You can enter a key for this Streamlit session, or configure it in Streamlit Secrets. Never paste your key into the research question or CSV.")
+        session_api_key = st.text_input(
+            "API key", type="password", value=st.session_state.get("ask_api_key", ""),
+            help="Stored only in this active Streamlit session when entered here.", key="ask_api_key_input"
+        )
+        session_base_url = st.text_input(
+            "Chat Completions endpoint", value=st.session_state.get("ask_api_base_url", "https://api.openai.com/v1/chat/completions"),
+            key="ask_api_base_url_input"
+        )
+        session_model = st.text_input(
+            "Model", value=st.session_state.get("ask_api_model", "gpt-4o-mini"), key="ask_api_model_input"
+        )
+        st.session_state["ask_api_key"] = session_api_key
+        st.session_state["ask_api_base_url"] = session_base_url
+        st.session_state["ask_api_model"] = session_model
+
     if st.button("Analyze evidence", type="primary", key="ask_evidence_button"):
         results = rank_evidence(data, question, limit=40) if question.strip() else []
         if not results:
-            st.warning("Enter a question and ensure the CSV contains relevant feedback.")
+            st.warning("No sufficiently specific evidence matched this question in the CSV. Try a narrower wording or review the dataset coverage; the app will not pad results with loosely related records.")
         else:
             retrieved = [item[2] for item in results]
             matched = pd.DataFrame(retrieved)
             theme_counts = matched["_label"].value_counts()
             source_counts = matched["_source"].value_counts()
             st.markdown("### Retrieved evidence")
-            st.write(f"Retrieved **{len(retrieved)} records** from **{len(data):,} total CSV records**. These are retrieval counts, not population estimates.")
+            st.write(f"Retrieved **{len(retrieved)} relevant candidate records** from **{len(data):,} total CSV records**. The question-specific filter may return fewer than 40; these are retrieval counts, not population estimates.")
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown("**Retrieved records by theme**")
@@ -999,9 +1046,9 @@ elif page == "Ask the Evidence":
                 st.markdown("**Retrieved records by source**")
                 st.dataframe(source_counts.rename_axis("Source").reset_index(name="Records"), use_container_width=True, hide_index=True)
 
-            api_key = os.getenv("LLM_API_KEY", "")
-            base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1/chat/completions")
-            model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+            api_key = st.session_state.get("ask_api_key", "") or os.getenv("LLM_API_KEY", "")
+            base_url = st.session_state.get("ask_api_base_url", "https://api.openai.com/v1/chat/completions") or os.getenv("LLM_BASE_URL", "https://api.openai.com/v1/chat/completions")
+            model = st.session_state.get("ask_api_model", "gpt-4o-mini") or os.getenv("LLM_MODEL", "gpt-4o-mini")
             try:
                 if "LLM_API_KEY" in st.secrets: api_key = st.secrets["LLM_API_KEY"]
                 if "LLM_BASE_URL" in st.secrets: base_url = st.secrets["LLM_BASE_URL"]
@@ -1090,7 +1137,7 @@ Evidence JSON: {json.dumps(evidence_payload, ensure_ascii=False)}"""
             for row in retrieved[:15]:
                 with st.container(border=True):
                     show_evidence(row)
-            st.caption("Review original quotes and links before accepting an insight. Retrieved counts are not population estimates; evidence suggests hypotheses, not causality.")
+            st.caption("Review original quotes and links before accepting an insight. Counts describe only question-matched records in this CSV, not population prevalence; evidence suggests hypotheses, not causality.")
 
 elif page == "Challenge & Insight":
     st.subheader("Challenge & insight")
