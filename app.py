@@ -402,11 +402,16 @@ with st.sidebar:
     page = st.radio(
         "Choose a section",
         [
-            "Research Overview", "Dashboard", "Primary Research", "Contradictions & Gaps",
-            "Failure Explorer", "Pattern Explorer", "Candidate Problem Areas",
-            "Evidence Explorer", "Ask the Evidence", "Challenge & Insight",
-            "Insight Methodology", "Quality & Integrity", "Insights",
-            "Opportunity Areas", "Pipeline"
+            "Research Overview",
+            "Dashboard",
+            "Failure Explorer",
+            "Pattern Explorer",
+            "Candidate Problem Areas",
+            "Evidence Explorer",
+            "Ask the Evidence",
+            "Opportunity Areas",
+            "Pipeline",
+            "Quality & Integrity",
         ],
         label_visibility="collapsed",
     )
