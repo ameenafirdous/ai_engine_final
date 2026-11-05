@@ -516,31 +516,88 @@ elif page == "Opportunity Areas":
 
 elif page == "Pipeline":
     st.subheader("Discovery pipeline")
-    st.caption("This is the workflow represented by the current CSV-first app.")
-    steps = [
-        ("1. Collect", "Gather public feedback and preserve source, date, text, and URL where available."),
-        ("2. Load & validate", "Read the local CSV, identify the feedback-text column, remove empty text rows, and normalize metadata for analysis."),
-        ("3. Filter & explore", "Filter by source and theme; inspect dataset volume, distributions, and time trends."),
-        ("4. Retrieve evidence", "Match a research question to relevant feedback using keyword overlap and theme text."),
-        ("5. Synthesize", "Use retrieved quotes and counts to formulate evidence-backed observations and opportunity hypotheses."),
-        ("6. Validate", "Open source links, review original quotes, and label any interpretation as a hypothesis until validated."),
-    ]
-    for title, description in steps:
-        with st.container(border=True):
-            st.markdown(f"**{title}**")
-            st.write(description)
+    st.caption(
+        "A transparent, CSV-first workflow that moves from collected feedback to "
+        "evidence-backed opportunity hypotheses. Each stage shows what the app actually does."
+    )
 
-    st.markdown("#### Current data checks")
+    # Compact visual styling scoped to this page's pipeline cards.
+    st.markdown(
+        """
+        <style>
+        .pipeline-kicker {font-size: .76rem; letter-spacing: .09em; text-transform: uppercase;
+            color: #64748b; font-weight: 700; margin-bottom: .35rem;}
+        .pipeline-stage {border: 1px solid rgba(100,116,139,.24); border-radius: 14px;
+            padding: 16px 16px 14px; min-height: 178px; background: rgba(148,163,184,.045);}
+        .pipeline-number {display: inline-flex; align-items: center; justify-content: center;
+            width: 30px; height: 30px; border-radius: 9px; background: #e2e8f0;
+            color: #0f172a; font-weight: 800; margin-bottom: 10px;}
+        .pipeline-stage h4 {font-size: 1rem; margin: 0 0 .45rem 0;}
+        .pipeline-stage p {font-size: .88rem; line-height: 1.45; margin: 0; color: var(--text-color);}
+        .pipeline-flow {text-align:center; color:#94a3b8; font-size:1.2rem; padding:2px 0 8px;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    stages = [
+        ("Collect", "Gather public feedback and retain the original text and available source metadata.", "Input"),
+        ("Load & validate", "Load the local CSV, detect columns, remove blank feedback, and normalize fields for analysis.", "Data preparation"),
+        ("Explore", "Review record volume, sources, themes, and dates. Dashboard filters apply to the Dashboard only.", "Explore"),
+        ("Retrieve evidence", "Match the research question against feedback text and theme labels using keywords and synonym expansion.", "Search"),
+        ("Synthesize", "Calculate counts for retrieved records, show themes and sources, and map themes to opportunity hypotheses.", "Evidence summary"),
+        ("Validate", "Inspect verbatim quotes and source links, manually review classifications, and record limitations in the Evidence Log.", "Human review"),
+    ]
+
+    st.markdown("<div class='pipeline-kicker'>From raw feedback to validated learning</div>", unsafe_allow_html=True)
+    for row_start in range(0, len(stages), 3):
+        cols = st.columns(3, gap="medium")
+        for col, (name, description, kind), idx in zip(
+            cols, stages[row_start:row_start + 3], range(row_start + 1, row_start + 4)
+        ):
+            with col:
+                st.markdown(
+                    f"<div class='pipeline-stage'>"
+                    f"<div class='pipeline-number'>{idx:02d}</div>"
+                    f"<h4>{name}</h4>"
+                    f"<p>{description}</p>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+        if row_start == 0:
+            st.markdown("<div class='pipeline-flow'>↓ &nbsp; ↓ &nbsp; ↓</div>", unsafe_allow_html=True)
+
+    st.markdown("### Dataset readiness")
+    st.caption("Checks reflect the currently loaded CSV and detected columns—not a claim that the feedback is fully validated.")
     checks = [
-        ("Dataset loaded", True, f"{csv_path.name}"),
-        ("Feedback text column detected", bool(columns["text"]), str(columns["text"])),
-        ("Source metadata detected", bool(columns["source"]), str(columns["source"] or "Not available")),
-        ("Date metadata detected", bool(columns["date"]), str(columns["date"] or "Not available")),
+        ("CSV loaded", True, csv_path.name),
+        ("Feedback text detected", bool(columns["text"]), str(columns["text"] or "Not detected")),
+        ("Source/platform detected", bool(columns["source"]), str(columns["source"] or "Not available")),
+        ("Date detected", bool(columns["date"]), str(columns["date"] or "Not available")),
         ("Source URL detected", bool(columns["url"]), str(columns["url"] or "Not available")),
         ("Theme/label detected", bool(columns["label"]), str(columns["label"] or "Not available")),
     ]
-    for label, passed, detail in checks:
-        st.write(("✓" if passed else "—") + f" **{label}:** {detail}")
+    ready_count = sum(1 for _, passed, _ in checks if passed)
+    metric_col, table_col = st.columns([1, 2.6], gap="large")
+    with metric_col:
+        st.metric("Metadata checks passed", f"{ready_count}/{len(checks)}")
+        st.progress(ready_count / len(checks))
+        st.caption("A detected field may still contain missing or inaccurate values.")
+    with table_col:
+        check_df = pd.DataFrame(
+            [{"Check": label, "Status": "Available" if passed else "Missing", "Details": detail}
+             for label, passed, detail in checks]
+        )
+        st.dataframe(check_df, use_container_width=True, hide_index=True)
+
+    with st.expander("Method and interpretation notes"):
+        st.markdown("""
+        - **Retrieval:** keyword overlap, synonym expansion, and available theme labels.
+        - **Counts:** describe records retrieved from this dataset; they are not population estimates.
+        - **Opportunity areas:** hypotheses mapped from feedback themes, not proven causes or measured impact.
+        - **Validation:** check the original quote and source, manually label a sample, and document disagreements.
+        - **Business metric:** the target is the share of first-time mutual-fund investors with at least one successful SIP instalment in the 30 days around month 12. This feedback workflow alone cannot measure that outcome or establish causality.
+        """)
 
 elif page == "Ask AI":
     st.subheader("Ask a research question")
