@@ -309,7 +309,20 @@ def rank_evidence(df, question, limit=40):
             ranked.append((score, idx, row, len(matched_anchors), len(q_tokens & text_tokens)))
 
     ranked.sort(key=lambda x: (-x[0], -x[3], -x[4], str(x[2].get("_id", ""))))
-    return ranked[:limit]
+
+    # Keep evidence relevant, but avoid allowing one platform to dominate the
+    # displayed sample when other sources also contain strong matches.
+    # Round-robin source selection preserves ranking within each source.
+    by_source = {}
+    for item in ranked:
+        source = str(item[2].get("_source", "Unknown"))
+        by_source.setdefault(source, []).append(item)
+    selected = []
+    while len(selected) < limit and any(by_source.values()):
+        for source in list(by_source):
+            if by_source[source] and len(selected) < limit:
+                selected.append(by_source[source].pop(0))
+    return selected
 
 
 def summarize_results(results, total_records):
@@ -1037,36 +1050,75 @@ elif page == "Ask the Evidence":
                 )
 
                 st.markdown("### Main evidence patterns")
-                pattern_defs = {
-                    "Continuation / motivation": [
-                        "continue", "continuing", "long term", "goal", "future", "wealth",
-                        "regular", "discipline", "habit", "stay invested"
-                    ],
-                    "Pause / stop / cancellation": [
-                        "stop", "stopped", "cancel", "pause", "paused", "restart",
-                        "discontinue", "withdraw", "missed"
-                    ],
-                    "Payment / mandate friction": [
-                        "payment", "failed", "mandate", "autopay", "debit", "bank",
-                        "instalment", "installment"
-                    ],
-                    "Affordability / cash flow": [
-                        "salary", "balance", "expense", "emergency", "afford", "cash",
-                        "amount", "income", "reduce"
-                    ],
-                    "Returns / risk / uncertainty": [
-                        "return", "loss", "negative", "market", "risk", "profit",
-                        "volatility", "uncertain"
-                    ],
-                    "App / support / trust": [
-                        "app", "support", "customer care", "trust", "complaint", "issue",
-                        "problem"
-                    ],
-                    "Status / transaction clarity": [
-                        "status", "transaction", "pending", "nav", "unit", "portfolio",
-                        "allotment"
-                    ],
+                profile = question_profile(question)
+                pattern_defs_by_profile = {
+                    "start_expectations": {
+                        "Goals / future planning": ["goal", "future", "retirement", "wealth", "child", "education"],
+                        "Recommendations / influence": ["recommend", "suggest", "friend", "family", "advisor", "youtube"],
+                        "Starting / first investment": ["start", "started", "first", "begin", "new investor"],
+                    },
+                    "behaviour_change": {
+                        "Monitoring / checking": ["check", "checking", "track", "tracking", "portfolio", "nav"],
+                        "Contribution changes": ["increase", "decrease", "reduce", "amount", "monthly"],
+                        "Payment interruptions": ["missed", "failed", "payment", "mandate", "debit"],
+                        "Pause / stop behaviour": ["pause", "paused", "stop", "stopped", "cancel"],
+                    },
+                    "pause_reduce_stop": {
+                        "Pause / restart": ["pause", "paused", "restart", "resume"],
+                        "Cancellation / stopping": ["stop", "stopped", "cancel", "cancelled", "canceled", "discontinue"],
+                        "Affordability / cash flow": ["salary", "balance", "expense", "emergency", "cash", "reduce", "amount"],
+                        "Payment failure": ["failed", "failure", "mandate", "autopay", "debit", "missed"],
+                    },
+                    "monitoring": {
+                        "Portfolio / return checks": ["portfolio", "return", "profit", "loss", "value"],
+                        "NAV / units / status": ["nav", "unit", "status", "transaction", "pending", "allotment"],
+                        "Check frequency": ["daily", "weekly", "monthly", "frequently", "every day", "check", "checking"],
+                    },
+                    "in_app_confusion": {
+                        "Status / transaction clarity": ["status", "transaction", "pending", "nav", "unit", "allotment"],
+                        "App errors / usability": ["error", "issue", "problem", "not working", "unable", "cannot"],
+                        "Support / resolution": ["support", "customer care", "complaint", "resolve", "response"],
+                    },
+                    "outside_app": {
+                        "Online research": ["youtube", "reddit", "google", "search online", "website"],
+                        "Advice from others": ["friend", "friends", "family", "advisor", "adviser", "ask someone"],
+                        "Community / messaging": ["whatsapp", "telegram", "forum", "community"],
+                    },
+                    "continuers_dropoffs": {
+                        "Continuation / discipline": ["continue", "continued", "regular", "discipline", "habit", "long term"],
+                        "Stop / pause / missed instalment": ["stop", "stopped", "pause", "cancel", "missed", "discontinue"],
+                        "Goals / motivation": ["goal", "future", "wealth", "retirement", "education"],
+                        "Financial constraints": ["salary", "income", "expense", "emergency", "balance"],
+                    },
+                    "segments": {
+                        "Income / cash-flow references": ["salary", "income", "bonus", "business", "irregular", "payday"],
+                        "Age / life-stage references": ["age", "young", "retire", "parent", "student", "child"],
+                        "Influence references": ["friend", "family", "advisor", "recommend", "influenced"],
+                    },
+                    "unmet_needs": {
+                        "Requests / missing features": ["wish", "need", "would like", "missing", "feature"],
+                        "Confusion / difficulty": ["confus", "unclear", "unable", "cannot", "could not", "understand"],
+                        "Support / help needs": ["help", "support", "issue", "problem", "frustrat"],
+                    },
+                    "affordability": {
+                        "Income / balance constraints": ["salary", "payday", "income", "balance", "cash flow", "cashflow"],
+                        "Unexpected expenses": ["emergency", "medical", "unexpected expense", "financial problem"],
+                        "Contribution reduction / missed payment": ["reduce sip", "reduce amount", "missed", "instalment", "installment"],
+                    },
+                    "payments": {
+                        "Payment failures": ["payment failed", "failed payment", "debit failed", "instalment failed", "installment failed"],
+                        "Mandate / autopay": ["mandate", "autopay", "auto debit", "e mandate", "e-mandate"],
+                        "Pending payment / transaction": ["pending", "processing", "transaction", "bank debit"],
+                    },
+                    "returns_risk": {
+                        "Negative returns / losses": ["loss", "negative return", "market fall", "market crash", "down market"],
+                        "Risk / uncertainty": ["risk", "fear", "uncertain", "volatility"],
+                        "Returns / performance": ["return", "profit", "growth", "performance"],
+                    },
                 }
+                pattern_defs = pattern_defs_by_profile.get(profile, {
+                    "Question keyword matches": list(set(tokens(question)))
+                })
                 pattern_rows = []
                 lower_text = matched["_text"].fillna("").astype(str).str.lower()
                 for pattern_name, terms in pattern_defs.items():
