@@ -22,6 +22,20 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# Consistent light theme: white surfaces and dark readable text.
+st.markdown("""
+<style>
+:root { color-scheme: light; }
+.stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] { background: #ffffff !important; color: #111827 !important; }
+[data-testid="stSidebar"], [data-testid="stSidebarContent"] { background: #f8fafc !important; color: #111827 !important; }
+.stApp, .stApp p, .stApp label, .stApp span, .stApp div, .stApp li, .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6 { color: #111827; }
+[data-testid="stMetricValue"], [data-testid="stMetricLabel"] { color: #111827 !important; }
+[data-testid="stMarkdownContainer"] a { color: #075985 !important; }
+input, textarea, [data-baseweb="select"] > div, [data-testid="stNumberInput"] input { background: #ffffff !important; color: #111827 !important; }
+[data-testid="stDataFrame"], [data-testid="stTable"] { background: #ffffff !important; }
+</style>
+""", unsafe_allow_html=True)
+
 ROOT = Path(__file__).resolve().parent
 CSV_CANDIDATES = [
     ROOT / "final.csv",
@@ -444,7 +458,6 @@ with st.sidebar:
     page = st.radio(
         "Choose a section",
         [
-            "Research Overview",
             "Dashboard",
             "Failure Explorer",
             "Pattern Explorer",
