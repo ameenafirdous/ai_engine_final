@@ -545,8 +545,8 @@ elif page == "Pipeline":
 elif page == "Ask AI":
     st.subheader("Ask a research question")
     st.caption(
-        "Ask about the loaded CSV. The app retrieves relevant feedback, summarizes "
-        "the strongest themes, and displays original quotes and source links."
+        "Evidence-led analysis of the loaded CSV: patterns, directional counts, "
+        "opportunity hypotheses, original feedback, and relevance to the 12-month SIP metric."
     )
 
     def sync_preset_to_question():
@@ -574,56 +574,137 @@ elif page == "Ask AI":
         if not question.strip():
             st.warning("Choose a preset or enter a question.")
         else:
-            results = rank_evidence(data, question, limit=25)
+            results = rank_evidence(data, question, limit=40)
             if not results:
                 st.warning(
-                    "No relevant rows were found in the CSV. Try broader wording "
+                    "No relevant rows were retrieved from this CSV. Try broader wording "
                     "or browse the Evidence Browser by theme."
                 )
             else:
                 matched = pd.DataFrame([item[2] for item in results])
+                n_retrieved = len(matched)
                 theme_counts = matched["_label"].value_counts()
                 source_counts = matched["_source"].value_counts()
 
-                st.markdown("#### What the dataset suggests")
+                st.markdown("### 1. Brief answer")
                 st.write(
-                    f"The search found **{len(results)} matching feedback records** "
-                    f"out of **{len(data):,} loaded records**. This is qualitative "
-                    "retrieval, not a representative survey estimate."
+                    f"The search retrieved **{n_retrieved} relevant records** from "
+                    f"**{len(data):,} loaded feedback records**. The evidence below "
+                    "shows recurring feedback related to your question. Retrieval is "
+                    "keyword/theme-based, so this is not a representative survey estimate."
                 )
 
-                if len(theme_counts):
-                    st.markdown("**Most represented themes in retrieved evidence:**")
-                    summary = theme_counts.head(5).rename_axis("Theme").reset_index(name="Matching records")
-                    st.dataframe(summary, use_container_width=True, hide_index=True)
-                    st.plotly_chart(
-                        px.bar(
-                            summary.sort_values("Matching records"),
-                            x="Matching records",
-                            y="Theme",
-                            orientation="h",
-                            title="Themes among retrieved feedback",
-                        ),
+                st.markdown("### 2. Key patterns")
+                pattern_defs = {
+                    "SIP continuation / motivation": ["continue", "continuing", "long term", "goal", "future", "wealth", "regular", "discipline", "habit", "stay invested"],
+                    "Pause / stop / cancellation": ["stop", "stopped", "cancel", "pause", "paused", "restart", "discontinue", "withdraw", "missed"],
+                    "Payment / mandate friction": ["payment", "failed", "mandate", "autopay", "debit", "bank", "instalment", "installment"],
+                    "Affordability / cash flow": ["salary", "balance", "expense", "emergency", "afford", "cash", "amount", "income", "reduce"],
+                    "Returns / risk / uncertainty": ["return", "loss", "negative", "market", "risk", "profit", "volatility", "uncertain"],
+                    "App / support / trust": ["app", "support", "customer care", "trust", "complaint", "issue", "problem"],
+                    "Status / transaction clarity": ["status", "transaction", "pending", "nav", "unit", "portfolio", "allotment"],
+                }
+                pattern_rows = []
+                for pattern_name, terms in pattern_defs.items():
+                    mask = matched["_text"].str.lower().apply(
+                        lambda text: any(term in text for term in terms)
+                    )
+                    count = int(mask.sum())
+                    if count:
+                        pattern_rows.append({
+                            "Pattern": pattern_name,
+                            "Retrieved records": count,
+                            "Share of retrieved": count / n_retrieved,
+                        })
+                if pattern_rows:
+                    pattern_df = pd.DataFrame(pattern_rows).sort_values(
+                        "Retrieved records", ascending=False
+                    )
+                    st.dataframe(
+                        pattern_df.style.format({"Share of retrieved": "{:.1%}"}),
                         use_container_width=True,
+                        hide_index=True,
                     )
-
-                if len(source_counts):
                     st.caption(
-                        "Sources represented: "
-                        + ", ".join(f"{source} ({count})" for source, count in source_counts.items())
+                        "Patterns can overlap. Counts are automated keyword matches within "
+                        "the retrieved records, not manually validated classifications."
                     )
+                else:
+                    st.write("No predefined pattern was detected; inspect the original evidence below.")
 
-                st.markdown("#### Supporting user feedback")
-                for item in results[:12]:
+                st.markdown("### 3. Quantification and source coverage")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.markdown("**Retrieved themes**")
+                    theme_summary = theme_counts.head(8).rename_axis("Theme").reset_index(name="Records")
+                    theme_summary["Share of retrieved"] = theme_summary["Records"] / n_retrieved
+                    st.dataframe(
+                        theme_summary.style.format({"Share of retrieved": "{:.1%}"}),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                with col_b:
+                    st.markdown("**Sources represented**")
+                    source_summary = source_counts.rename_axis("Source").reset_index(name="Records")
+                    st.dataframe(source_summary, use_container_width=True, hide_index=True)
+
+                st.markdown("### 4. Opportunity areas to investigate")
+                st.caption(
+                    "Ranked by retrieved evidence volume only. Volume is not severity, "
+                    "causal impact, or proof that an intervention will improve continuation."
+                )
+                opportunity_rows_local = []
+                for theme, count in theme_counts.items():
+                    label_norm = norm(theme)
+                    mapped = None
+                    for key, value in THEME_OPPORTUNITIES.items():
+                        if norm(key) == label_norm or norm(key) in label_norm or label_norm in norm(key):
+                            mapped = value
+                            break
+                    if mapped is None:
+                        mapped = (
+                            f"Investigate: {theme}",
+                            "Review the original feedback to determine whether this theme represents an actionable user problem."
+                        )
+                    opportunity_rows_local.append({
+                        "Theme": theme,
+                        "Retrieved records": int(count),
+                        "Opportunity hypothesis": mapped[0],
+                        "Potential direction": mapped[1],
+                    })
+                opportunity_df = pd.DataFrame(opportunity_rows_local).head(6)
+                for _, opp in opportunity_df.iterrows():
                     with st.container(border=True):
-                        show_evidence(item[2])
+                        st.markdown(f"**{opp['Opportunity hypothesis']}**")
+                        st.caption(f"{opp['Theme']} · {opp['Retrieved records']} retrieved records")
+                        st.write(opp["Potential direction"])
 
-                st.info(
-                    "Review the original quotes before reporting a conclusion. "
-                    "The app summarizes retrieved CSV evidence; it does not infer "
-                    "causation or invent missing information."
+                st.markdown("### 5. Original user evidence")
+                st.caption("Quotes are displayed verbatim from the CSV; metadata and source links are retained.")
+                for item in results[:12]:
+                    score, idx, row, direct_score, label_score = item
+                    with st.container(border=True):
+                        show_evidence(row)
+
+                st.markdown("### 6. Connection to the business metric")
+                st.write(
+                    "These findings may indicate friction or motivations that could influence "
+                    "whether a first-time investor has at least one successful SIP instalment "
+                    "in the 30 days around the 12-month mark. The feedback dataset does not "
+                    "by itself establish that a theme causes SIP drop-off or changes the "
+                    "12-month active-SIP continuation rate. Treat each opportunity as a hypothesis "
+                    "to validate with user research and product/behavioral data."
                 )
 
+                st.markdown("### 7. Evidence quality and limitations")
+                st.write(
+                    f"- **Evidence base:** {n_retrieved} retrieved records from {len(data):,} loaded records.\n"
+                    "- **Method:** keyword overlap, synonym expansion, and available theme labels; no LLM-generated facts.\n"
+                    "- **Quantification:** automated keyword counts within retrieved records; patterns may overlap and need manual review.\n"
+                    "- **Representativeness:** collected public feedback may be self-selected and does not represent all investors.\n"
+                    "- **Causality:** quotes and themes suggest hypotheses, not causal explanations or measured impact.\n"
+                    "- **Validation:** inspect the original quote and source link, then hand-label a sample and record agreement in the AI Evidence Log."
+                )
 elif page == "Evidence Browser":
     st.subheader("Evidence browser")
     st.caption("Use dropdowns to filter by year, platform, and assigned theme.")
@@ -673,4 +754,3 @@ elif page == "Evidence Browser":
         for _, row in browser.head(100).iterrows():
             with st.container(border=True):
                 show_evidence(row)
-
