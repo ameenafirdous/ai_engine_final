@@ -1338,18 +1338,19 @@ elif page == "Insight Methodology":
 elif page == "Golden Set Validation":
     st.subheader("Golden Set: Engine vs Human Label")
     st.caption(
-        "The engine predicts a category from each original comment without reading its gold label. "
-        "You then verify the human label against the original comment and compare both."
+        "The existing Human Label (Gold) is treated as fixed ground truth for this comparison. "
+        "The engine independently predicts a label from the original feedback text, then the app compares both."
     )
 
     golden_candidates = [
+        ROOT / "INDmoney_Golden_Set_Sample_20 (1).csv",
+        ROOT / "INDmoney_Golden_Set_Sample_20.csv",
         ROOT / "INDmoney_Golden_Set_20_From_Source_CSV.csv",
         ROOT / "golden_set_20.csv",
-        ROOT / "INDmoney_Golden_Set_Sample_20.csv",
     ]
     golden_path = next((p for p in golden_candidates if p.exists()), None)
     if golden_path is None:
-        st.error("Golden Set file not found. Place INDmoney_Golden_Set_20_From_Source_CSV.csv beside app.py.")
+        st.error("Golden Set CSV not found. Keep the Golden Set CSV in the same folder as app.py.")
         st.stop()
 
     try:
@@ -1364,316 +1365,192 @@ elif page == "Golden Set Validation":
         st.error("Golden Set is missing required columns: " + ", ".join(missing))
         st.stop()
 
-    # These seven categories match the label taxonomy in the supplied Golden Set.
-    # Prediction uses original_text only. Human labels are never classifier inputs.
-    CLASSIFIER_RULES = {
-        "App Experience & Support": {
-            "strong": [
-                 "not able to find", "cannot find", "can't find", "ui ux", "ui/ux",
-                "edit the sip date", "edit sip date", "change the sip date", "adjust the sip date",
-                "confusing", "cluttered", "app closes", "app crash", "customer support",
-                "customer care", "unable to login", "user experience", "difficult to find",
-                "no helpline", "no information", "poor ux", "app is slow",
-            ],
-            "support": ["app", "support", "find", "option", "screen", "interface",
-                        "login", "customer", "navigation", "glitch", "crash", "experience"],
-        },
-        "SIP Education & General Discussion": {
-            "strong": [
-                "you don't stop your sip unless", "you dont stop your sip unless",
-                "what is sip", "how does sip work", "sip basics", "learn about sip",
-                "explain sip", "how to start sip", "difference between sip and lump",
-                 "what is the difference between an sip", "general discussion",
-                "how do they work for beginners", "for beginners", "rupee cost averaging",
-                "financial discipline", "how does starting a sip with just",
-                "long term wealth building", "long-term wealth building", "wealth building",
-            ],
-            "support": ["explain",  "difference", "learn", "beginner", "meaning",
-                        "basics", "what is", "how to", "should i", "how do they work"],
-        },
-        "Financial Planning & Affordability": {
-            "strong": [
-                "for my goal", "my goal", "salary", "monthly income", "monthly expenses",
-                "emergency fund", "afford", "affordable", "budget", "financial planning",
-                "take home", "cash flow", "how much can i invest", "how much to invest",
-                "which is better then fd", "no idea how to make an investment",
-                "rent", "expenses", "saving", "savings", "income",
-            ],
-            "support": ["goal", "salary", "income", "expense", "budget", "afford",
-                        "emergency", "saving", "savings", "monthly", "rent", "plan",
-                        "spend", "bills", "cash"],
-        },
+    # Use only the labels already present in this Golden Set. Never use these labels
+    # as inputs to the prediction function.
+    taxonomy = sorted(golden["Human Label (Gold)"].astype(str).str.strip().replace("", "Unlabelled").unique().tolist())
+
+    # Transparent baseline classifier: prediction is based only on original_text.
+    # These rules reflect the three categories present in this supplied 20-record set.
+    ENGINE_RULES = {
         "Payments & Mandates": {
             "strong": [
-                "mandate", "autopay", "auto debit", "standing instruction",
-                 "micro-debit", "micro debit", "micro debits", "mandates are not executed",
-                "mandate amount", "mandate not executed", "executed for amount",
-                "change the bank mandate", "new mandate", "payment failed",
-                "failed payment", "bank account", "bank link", "debit", "processing",
-                "refund", "amount deducted", "mandate bounce", "sip instalment",
-                "sip installment", "gpay", "upi",
+                "mandate", "auto debit", "autodebit", "standing instruction",
+                "micro-debit", "micro debit", "gpay", "upi", "bank link",
+                "bank account", "payment failed", "payment is not", "sip not deducted",
+                "not deducted", "amount deducted", "deducting", "debiting",
+                "order rejected", "rejected", "money not refunded", "not refunded",
+                "refund", "processing", "sip not getting set up", "sip sits blocked",
+                "sip instalment", "sip installment", "mandate bounce", "mandate fine",
+                "change the bank mandate", "mandates are not executed",
+                "amount other than mandate", "standing instruction has no value",
             ],
-            "support": ["mandate", "bank", "debit", "payment", "processing", "refund",
-                        "deduct", "instalment", "installment", "upi", "gpay", "verification"],
-        },
-        "Returns & Market Volatility": {
-            "strong": [
-                "market fall", "market crash", "flat market", "flat markets",
-                 "volatile market", "difference between an sip and a lump sum investment during a volatile market",
-                "volatility", "negative return", "negative returns", "time in the market",
-                "market after a fall",
-                "loss", "returns", "market is down", "market down", "drawdown",
-                "cagr", "risk appetite", "muted returns", "short term drawdowns",
+            "support": [
+                "payment", "bank", "debit", "deduct", "refund", "transaction",
+                "instalment", "installment", "verification", "rejected", "processing",
+                "sip set up", "sip setup", "amount",
             ],
-            "support": ["market", "return", "loss", "volatile", "volatility",
-                        "fall", "crash", "drawdown", "cagr", "risk", "profit"],
         },
         "Pause, Stop & Cancellation": {
             "strong": [
-                "cancel sip", "cancelled sip", "canceled sip", "stop sip",
-                "stopped sip", "pause sip", "paused sip", "unpause", "cancellation",
-                "cancel my", "stop my", "stopping sip", "no option for stopping",
-                "unable to cancel", "easy to cancel sip", "stop and redeem",
-                "unable to unpause",
+                "cancel sip", "cancelled sip", "canceled sip", "cancel my",
+                "cancellation requested", "cancellation request", "stop sip",
+                "stop sips", "stopping sips", "stopped sip", "pause sip",
+                "paused sip", "no option for stopping", "no option to stop",
+                "unable to cancel", "can't cancel", "cannot cancel",
+                "stop and redeem", "closed my sip", "close my sip",
+                "want to stop", "want to cancel", "requested to cancel",
             ],
-            "support": ["pause", "paused", "unpause", "cancel", "cancellation",
-                        "stop", "stopped", "redeem", "restart", "resume"],
+            "support": [
+                "cancel", "cancellation", "stop", "stopped", "pause", "paused",
+                "redeem", "resume", "restart", "quitting",
+            ],
         },
-        "Fund Selection & Portfolio": {
+        "App Experience & Support": {
             "strong": [
-                "fund selection", "funds", "portfolio", "xirr", "nav", "large cap",
-                "small cap", "mid cap", "asset allocation", "mutual fund showing",
-                "holdings", "fund allocation", "fund recommendation", "portfolio review",
-                "choosing wrong funds", "which fund", "funds are",
+                "not able to find", "can't find", "cannot find", "cant find",
+                "unable to login", "can't login", "cannot login", "can't log in",
+                "security maintenance", "app keeps", "app keep", "app crashes",
+                "customer support", "customer care", "support team",
+                "no option to find", "cant even find", "can't even find",
+                "not allowing me", "not able to", "no proper explanation",
+                "no information", "no real time customer care",
+                "not updated", "transactions are not updated",
             ],
-            "support": ["fund", "funds", "portfolio", "allocation", "xirr", "nav",
-                        "holdings", "largecap", "smallcap", "midcap", "mutual", "units"],
+            "support": [
+                "app", "application", "experience", "support", "customer",
+                "login", "find", "option", "screen", "interface", "help",
+                "information", "service team", "service",
+            ],
         },
     }
 
-    def predict_engine_theme(text):
-        text_n = norm(text)
+    def predict_engine_label(comment):
+        txt = norm(str(comment))
         scored = []
-        for theme, rule in CLASSIFIER_RULES.items():
-            strong_hits = [term for term in rule["strong"] if norm(term) in text_n]
-            support_hits = [term for term in rule["support"] if norm(term) in text_n]
+        for label, rules in ENGINE_RULES.items():
+            strong_hits = [term for term in rules["strong"] if norm(term) in txt]
+            support_hits = [term for term in rules["support"] if norm(term) in txt]
             score = 5 * len(strong_hits) + len(support_hits)
             if score:
-                scored.append((score, theme, strong_hits, support_hits))
+                scored.append((score, label, strong_hits, support_hits))
         if not scored:
-            return "Needs human review", 0, [], "No category-specific rule matched."
+            return "Needs review", 0, [], "No clear category-specific phrase found."
         scored.sort(key=lambda x: (-x[0], x[1]))
-        best = scored[0]
-        if len(scored) > 1 and scored[1][0] == best[0]:
-            return "Needs human review", best[0], [], (
-                "Ambiguous match: " + " / ".join(x[1] for x in scored if x[0] == best[0])
+        top = scored[0]
+        # A strong, specific category phrase wins; tied scores are safely flagged.
+        if len(scored) > 1 and scored[1][0] == top[0]:
+            return "Needs review", top[0], [], "Ambiguous evidence across: " + ", ".join(
+                x[1] for x in scored if x[0] == top[0]
             )
-        evidence = best[2] + best[3]
-        confidence = "Strong phrase match" if best[2] else "Support-keyword match"
-        return best[1], best[0], evidence, confidence
+        return top[1], top[0], top[2] + top[3], (
+            "Specific phrase match" if top[2] else "Supporting keyword match"
+        )
 
-    # Always recompute the untouched engine prediction from comment text.
-    # Human label and reviewer edits are not passed to the classifier.
-    predictions = {
-        str(row["feedback_id"]): predict_engine_theme(str(row["original_text"]))
+    predictions = [
+        predict_engine_label(row["original_text"])
         for _, row in golden.iterrows()
-    }
-    if "gold_verified_labels" not in st.session_state:
-        st.session_state["gold_verified_labels"] = {}
-    if "gold_verified_checks" not in st.session_state:
-        st.session_state["gold_verified_checks"] = {}
-    if "gold_review_notes_v2" not in st.session_state:
-        st.session_state["gold_review_notes_v2"] = {}
+    ]
 
-    taxonomy = list(CLASSIFIER_RULES.keys())
     st.info(
-        "Important methodology note: the main discovery engine currently retrieves and ranks evidence "
-        "using keyword anchors, synonym expansion and recorded labels; it does not itself assign a new "
-        "theme to every record. This page adds a transparent rule-based theme-classification baseline "
-        "for evaluation. It is not an LLM or trained ML classifier. The automatic prediction is kept "
-        "separate from the human label and is never overwritten by reviewer corrections."
+        "Human labels are loaded as-is from the Golden Set CSV and are not editable here. "
+        "Engine predictions are generated from original_text only; the Human Label (Gold) column "
+        "is never passed into the classifier."
     )
 
-    st.markdown("### Review the 20 records")
-    st.caption(
-        "The CSV's existing label is a starting label, not automatically a hand-verified gold label. "
-        "Open the source comment, confirm or correct its category, then tick the verification box."
-    )
-
-    for _, row in golden.iterrows():
-        rid = str(row["feedback_id"])
-        original = str(row["original_text"])
-        source_gold = str(row["Human Label (Gold)"]).strip()
-        auto_label, score, hits, rationale = predictions[rid]
-
-        current_human = st.session_state["gold_verified_labels"].get(rid, source_gold)
-        current_verified = st.session_state["gold_verified_checks"].get(rid, False)
-        current_note = st.session_state["gold_review_notes_v2"].get(rid, "")
-
-        with st.expander(f"{rid} · Engine: {auto_label}", expanded=False):
-            st.markdown("**Original feedback (verbatim)**")
-            st.write(original)
-            meta = []
-            if str(row.get("source_platform", "")).strip():
-                meta.append(str(row["source_platform"]).strip())
-            if str(row.get("review_date", "")).strip():
-                meta.append(str(row["review_date"]).strip())
-            if meta:
-                st.caption(" · ".join(meta))
-            url = str(row.get("source_url", "")).strip()
-            if url and url.lower() not in {"nan", "none"}:
-                st.markdown(f"[Open original source]({url})")
-
-            st.markdown("**Original CSV label (not independently verified)**")
-            st.write(source_gold)
-            st.markdown("**Automatic engine classification**")
-            st.write(auto_label)
-            st.caption(
-                f"{rationale} · Rule score: {score} · Matched evidence: "
-                + (", ".join(hits) if hits else "None")
-            )
-
-            verified_human = st.selectbox(
-                "Human label after checking the original comment",
-                taxonomy,
-                index=taxonomy.index(current_human) if current_human in taxonomy else (
-                    taxonomy.index(source_gold) if source_gold in taxonomy else 0
-                ),
-                key=f"verified_gold_{rid}",
-            )
-            verified = st.checkbox(
-                "I checked the original comment/source and confirm this human label",
-                value=current_verified,
-                key=f"verify_gold_{rid}",
-            )
-            reviewer_note = st.text_input(
-                "Reason for correction / reviewer note (especially if changed)",
-                value=current_note,
-                key=f"gold_review_note_{rid}",
-            )
-            st.session_state["gold_verified_labels"][rid] = verified_human
-            st.session_state["gold_verified_checks"][rid] = verified
-            st.session_state["gold_review_notes_v2"][rid] = reviewer_note
-
-            if not verified:
-                st.warning("Not counted yet: verify the human label before including this record in the accuracy score.")
-            elif auto_label == "Needs human review":
-                st.warning("Engine abstained. Counted separately; it is not an exact-label match.")
-            elif auto_label == verified_human:
-                st.success("Comparison: MATCH")
-            else:
-                st.error(f"Comparison: MISMATCH · Human = {verified_human} · Engine = {auto_label}")
-
-    # Build comparison against independently verified human labels only.
+    # Record-level side-by-side view, preserving original comments and gold labels.
     comparison_rows = []
-    for _, row in golden.iterrows():
-        rid = str(row["feedback_id"])
-        source_gold = str(row["Human Label (Gold)"]).strip()
-        human_label = st.session_state["gold_verified_labels"].get(rid, source_gold)
-        verified = bool(st.session_state["gold_verified_checks"].get(rid, False))
-        auto_label, score, hits, rationale = predictions[rid]
-        if not verified:
-            result = "Awaiting human verification"
-        elif auto_label == "Needs human review":
-            result = "Engine abstained"
-        elif auto_label == human_label:
-            result = "Match"
-        else:
-            result = "Mismatch"
+    for (_, row), prediction in zip(golden.iterrows(), predictions):
+        engine_label, score, hits, reason = prediction
+        human_label = str(row["Human Label (Gold)"]).strip()
+        result = "Match" if engine_label == human_label else (
+            "Engine abstained" if engine_label == "Needs review" else "Mismatch"
+        )
         comparison_rows.append({
-            "Record ID": rid,
-            "Original CSV Label": source_gold,
-            "Verified Human Label": human_label if verified else "Not verified",
-            "Engine Prediction": auto_label,
+            "Record ID": str(row["feedback_id"]),
+            "Original Feedback": str(row["original_text"]),
+            "Human Label (Gold)": human_label,
+            "Engine Prediction": engine_label,
             "Comparison": result,
-            "Rule Score": score,
-            "Matched Terms": ", ".join(hits),
-            "Reviewer Notes": st.session_state["gold_review_notes_v2"].get(rid, ""),
+            "Engine Score": score,
+            "Matched Evidence": ", ".join(hits),
+            "Engine Reason": reason,
         })
     comparison = pd.DataFrame(comparison_rows)
 
-    verified_rows = comparison[comparison["Comparison"].isin(["Match", "Mismatch", "Engine abstained"])]
-    matches = int((verified_rows["Comparison"] == "Match").sum())
-    mismatches = int((verified_rows["Comparison"] == "Mismatch").sum())
-    abstentions = int((verified_rows["Comparison"] == "Engine abstained").sum())
-    awaiting = int((comparison["Comparison"] == "Awaiting human verification").sum())
+    matches = int((comparison["Comparison"] == "Match").sum())
+    mismatches = int((comparison["Comparison"] == "Mismatch").sum())
+    abstentions = int((comparison["Comparison"] == "Engine abstained").sum())
+    total = len(comparison)
+    scored_total = matches + mismatches
+    agreement = matches / scored_total if scored_total else 0.0
 
-    st.markdown("### Evaluation results")
+    st.markdown("### Overall comparison")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Human labels verified", len(verified_rows), f"of {len(golden)}")
+    c1.metric("Golden Set records", total)
     c2.metric("Matches", matches)
     c3.metric("Mismatches", mismatches)
-    c4.metric("Engine abstentions", abstentions)
-    if len(verified_rows):
-        st.metric("Exact-label agreement on verified records", f"{matches / len(verified_rows):.1%}")
-        st.caption(
-            "Agreement denominator includes verified records where the engine abstained. "
-            "Abstentions are not counted as matches. This is a small, selected 20-record test set, "
-            "not a population-level performance estimate."
-        )
-    else:
-        st.warning("Verify at least one human label to calculate an evaluation score.")
-    st.caption(f"{awaiting} records are still awaiting human verification.")
+    c4.metric("Needs review", abstentions)
+    st.metric("Exact-label agreement (excluding abstentions)", f"{agreement:.1%}")
+    st.caption(
+        f"Coverage: {scored_total}/{total} records received a definite engine label. "
+        "Agreement is calculated only on definite predictions; abstentions are shown separately."
+    )
 
-    st.markdown("#### Record-level comparison")
-    st.dataframe(comparison, use_container_width=True, hide_index=True)
+    st.markdown("### Record-level comparison")
+    st.dataframe(
+        comparison[["Record ID", "Human Label (Gold)", "Engine Prediction", "Comparison",
+                    "Engine Score", "Matched Evidence"]],
+        use_container_width=True,
+        hide_index=True,
+    )
 
-    if len(verified_rows):
-        theme_rows = []
-        for theme in taxonomy:
-            subset = verified_rows[verified_rows["Engine Prediction"] == theme]
-            if len(subset):
-                tp = int((subset["Verified Human Label"] == theme).sum())
-                theme_rows.append({
-                    "Engine-predicted theme": theme,
-                    "Predictions": len(subset),
-                    "Correct": tp,
-                    "Precision": tp / len(subset),
-                })
-        if theme_rows:
-            st.markdown("#### Per-theme precision")
-            st.dataframe(
-                pd.DataFrame(theme_rows).style.format({"Precision": "{:.1%}"}),
-                use_container_width=True,
-                hide_index=True,
+    with st.expander("Inspect original feedback and engine reasoning"):
+        for _, r in comparison.iterrows():
+            st.markdown(f"**{r['Record ID']} — {r['Comparison']}**")
+            st.write(r["Original Feedback"])
+            st.caption(
+                f"Human: {r['Human Label (Gold)']} | Engine: {r['Engine Prediction']} | "
+                f"Reason: {r['Engine Reason']}"
             )
 
+    st.markdown("### Performance by human label")
+    per_label = []
+    for label in taxonomy:
+        subset = comparison[comparison["Human Label (Gold)"] == label]
+        definite = subset[subset["Engine Prediction"] != "Needs review"]
+        correct = int((definite["Engine Prediction"] == label).sum())
+        per_label.append({
+            "Human label": label,
+            "Records": len(subset),
+            "Correct engine labels": correct,
+            "Mismatches": int((subset["Comparison"] == "Mismatch").sum()),
+            "Abstentions": int((subset["Comparison"] == "Engine abstained").sum()),
+            "Recall on definite predictions": correct / len(definite) if len(definite) else 0.0,
+        })
+    st.dataframe(
+        pd.DataFrame(per_label).style.format({"Recall on definite predictions": "{:.1%}"}),
+        use_container_width=True,
+        hide_index=True,
+    )
+
     export = golden.copy()
-    export["Original CSV Label"] = export["Human Label (Gold)"]
-    export["Verified Human Label"] = export["feedback_id"].astype(str).map(
-        st.session_state["gold_verified_labels"]
-    )
-    export["Human Label Verified"] = export["feedback_id"].astype(str).map(
-        st.session_state["gold_verified_checks"]
-    )
-    export["Engine Prediction"] = export["feedback_id"].astype(str).map(
-        {rid: p[0] for rid, p in predictions.items()}
-    )
-    export["Engine Rule Score"] = export["feedback_id"].astype(str).map(
-        {rid: p[1] for rid, p in predictions.items()}
-    )
-    export["Engine Matched Terms"] = export["feedback_id"].astype(str).map(
-        {rid: ", ".join(p[2]) for rid, p in predictions.items()}
-    )
-    export["Comparison"] = export["feedback_id"].astype(str).map(
-        comparison.set_index("Record ID")["Comparison"].to_dict()
-    )
-    export["Reviewer Notes (Evaluation)"] = export["feedback_id"].astype(str).map(
-        st.session_state["gold_review_notes_v2"]
-    )
+    export["Engine Prediction"] = [p[0] for p in predictions]
+    export["Engine Score"] = [p[1] for p in predictions]
+    export["Engine Matched Evidence"] = [", ".join(p[2]) for p in predictions]
+    export["Engine Reason"] = [p[3] for p in predictions]
+    export["Comparison"] = comparison["Comparison"]
     st.download_button(
-        "Download Golden Set evaluation CSV",
+        "Download engine vs human comparison CSV",
         data=export.to_csv(index=False).encode("utf-8-sig"),
-        file_name="INDmoney_Golden_Set_Evaluation_Log.csv",
+        file_name="INDmoney_Golden_Set_Engine_vs_Human_Comparison.csv",
         mime="text/csv",
         type="primary",
     )
 
     st.caption(
-        "This evaluates the transparent rule-based classification baseline only. It does not measure "
-        "the relevance of Ask the Evidence retrieval, does not establish causality, and does not "
-        "measure 12-month SIP continuation. Human labels must be checked against the original comments "
-        "before reporting agreement in the AI Evidence Log."
+        "Evaluation note: this is a transparent rule-based classification baseline, not a trained ML model "
+        "or an LLM classification result. Review the mismatches before reporting performance. "
+        "A 20-record selected Golden Set is a small evaluation sample and does not establish population-level accuracy."
     )
 
 elif page == "Quality & Integrity":
