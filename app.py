@@ -37,12 +37,18 @@ input, textarea, [data-baseweb="select"] > div, [data-testid="stNumberInput"] in
 """, unsafe_allow_html=True)
 
 ROOT = Path(__file__).resolve().parent
-CSV_CANDIDATES = [
-    ROOT / "final_labeled.csv",
-    ROOT / "finall.csv",
-    ROOT / "finall(2).csv",
-    ROOT / "final(2).csv",
-    ROOT / "data.csv",
+
+# IMPORTANT: This is the MAIN research dataset used by Dashboard, Ask AI,
+# Evidence Explorer, Opportunity Areas, and all discovery sections.
+# Keep the Golden Set CSV separate; it is loaded only inside Golden Set Validation.
+MAIN_DATA_CSV = ROOT / "final_labeled.csv"
+
+# Golden Set files are used only for the independent human-vs-engine evaluation.
+GOLDEN_SET_CANDIDATES = [
+    ROOT / "INDmoney_Golden_Set_Sample_20 (1).csv",
+    ROOT / "INDmoney_Golden_Set_Sample_20.csv",
+    ROOT / "INDmoney_Golden_Set_20_From_Source_CSV.csv",
+    ROOT / "golden_set_20.csv",
 ]
 
 PRESET_QUESTIONS = [
@@ -169,16 +175,29 @@ def find_column(df, candidates):
 
 
 @st.cache_data(show_spinner=False)
-def load_csv(path_string):
+def load_csv(path_string, modified_time=None, file_size=None):
+    """Load a CSV; file metadata participates in the cache key so updates reload."""
     return pd.read_csv(path_string, encoding_errors="replace")
 
 
 def discover_csv():
-    for path in CSV_CANDIDATES:
-        if path.exists():
+    """Return only the explicitly configured MAIN dataset.
+
+    Deliberately do not auto-select the first CSV in the folder: that could
+    accidentally load the Golden Set into the research dashboard.
+    """
+    return MAIN_DATA_CSV if MAIN_DATA_CSV.is_file() else None
+
+
+def discover_golden_set():
+    """Find a Golden Set file without ever using it as the main dataset."""
+    for path in GOLDEN_SET_CANDIDATES:
+        if path.is_file():
             return path
-    csvs = sorted(ROOT.glob("*.csv"))
-    return csvs[0] if csvs else None
+
+    # Allow a clearly named Golden Set CSV with a slightly different suffix.
+    matches = sorted(ROOT.glob("INDmoney_Golden_Set*.csv"))
+    return matches[0] if matches else None
 
 
 def prepare_data(raw):
@@ -459,28 +478,44 @@ with st.sidebar:
         "Choose a section",
         [
             "Dashboard",
+            "Insights",
+            "Opportunity Areas",
+            "Pipeline",
+            "Ask AI",
+            "Research Overview",
+            "Primary Research",
+            "Contradictions & Gaps",
             "Failure Explorer",
             "Pattern Explorer",
             "Candidate Problem Areas",
             "Evidence Explorer",
             "Ask the Evidence",
-            "Opportunity Areas",
-            "Pipeline",
+            "Challenge & Insight",
+            "Insight Methodology",
             "Golden Set Validation",
             "Quality & Integrity",
+            "Evidence Browser",
         ],
         label_visibility="collapsed",
     )
     st.divider()
-    st.caption("Data source: local CSV file in the same folder as app.py.")
+    st.caption("Research source: final_labeled.csv. Golden Set is loaded separately for validation only.")
 
 csv_path = discover_csv()
 if csv_path is None:
-    st.error("No CSV file found. Place your dataset beside app.py (for example, final.csv or finall.csv).")
+    st.error(
+        f"Main dataset not found: {MAIN_DATA_CSV.name}. "
+        "Upload final_labeled.csv into the same GitHub folder as app.py. "
+        "The app will not fall back to a Golden Set or an arbitrary CSV."
+    )
     st.stop()
 
 try:
-    raw_df = load_csv(str(csv_path))
+    raw_df = load_csv(
+        str(csv_path),
+        modified_time=csv_path.stat().st_mtime,
+        file_size=csv_path.stat().st_size,
+    )
     data, columns = prepare_data(raw_df)
 except Exception as exc:
     st.error(f"Could not load the dataset: {exc}")
@@ -1338,17 +1373,11 @@ elif page == "Insight Methodology":
 elif page == "Golden Set Validation":
     st.subheader("Golden Set: Engine vs Human Label")
     st.caption(
-        "The existing Human Label (Gold) is treated as fixed ground truth for this comparison. "
+        "The Golden Set is separate from the main research dataset. The existing Human Label (Gold) is treated as fixed ground truth for this comparison. "
         "The engine independently predicts a label from the original feedback text, then the app compares both."
     )
 
-    golden_candidates = [
-        ROOT / "INDmoney_Golden_Set_Sample_20 (1).csv",
-        ROOT / "INDmoney_Golden_Set_Sample_20.csv",
-        ROOT / "INDmoney_Golden_Set_20_From_Source_CSV.csv",
-        ROOT / "golden_set_20.csv",
-    ]
-    golden_path = next((p for p in golden_candidates if p.exists()), None)
+    golden_path = discover_golden_set()
     if golden_path is None:
         st.error("Golden Set CSV not found. Keep the Golden Set CSV in the same folder as app.py.")
         st.stop()
