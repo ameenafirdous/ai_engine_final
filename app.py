@@ -41,7 +41,7 @@ ROOT = Path(__file__).resolve().parent
 # IMPORTANT: This is the MAIN research dataset used by Dashboard, Ask AI,
 # Evidence Explorer, Opportunity Areas, and all discovery sections.
 # Keep the Golden Set CSV separate; it is loaded only inside Golden Set Validation.
-MAIN_DATA_CSV = ROOT / "final_labeled.csv"
+MAIN_DATA_CSV = ROOT / "finall_labeled.csv"
 
 # Golden Set files are used only for the independent human-vs-engine evaluation.
 GOLDEN_SET_CANDIDATES = [
